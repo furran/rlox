@@ -1,9 +1,9 @@
 use std::{io::Write, mem};
 
 use crate::{
-    common::{OpCode, Value},
+    common::{ObjString, ObjectRef, OpCode, Value},
     compiler::Compiler,
-    vm::chunk::Chunk,
+    vm::{chunk::Chunk, heap::Heap},
 };
 
 #[derive(Debug)]
@@ -23,6 +23,8 @@ struct Stack<T, const N: usize> {
 impl<T, const N: usize> Stack<T, N>
 where
     T: Default,
+    T: Copy,
+    T: std::fmt::Display,
 {
     fn new() -> Self {
         Self {
@@ -41,12 +43,12 @@ where
         mem::take(&mut self.data[self.top])
     }
 
-    fn top(&self) -> &T {
-        &self.data[self.top - 1]
+    fn top(&self) -> T {
+        self.data[self.top - 1]
     }
 
-    fn peek(&self, offset: usize) -> &T {
-        &self.data[self.top - 1 - offset]
+    fn peek(&self, offset: usize) -> T {
+        self.data[self.top - 1 - offset]
     }
 
     fn is_empty(&self) -> bool {
@@ -72,7 +74,7 @@ where
         print!("Stack [");
         for i in 0..self.top {
             let val = &self.data[i];
-            print!(" {:?}", val);
+            print!(" {}", val);
             if i != self.top - 1 {
                 print!(", ")
             }
@@ -82,13 +84,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct VM<'a> {
-    chunk: &'a mut Chunk,
+pub struct VM<'src> {
+    chunk: Chunk<'src>,
     ip: usize,
-    stack: Stack<Value, 256>,
+    stack: Stack<Value<'src>, 256>,
+    heap: Heap<'src>,
 }
 
-impl<'a> VM<'a> {
+impl<'src> VM<'src> {
     pub fn repl() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
@@ -124,13 +127,15 @@ impl<'a> VM<'a> {
 
     pub fn interpret(source: &str) -> VMResult {
         let mut chunk = Chunk::new();
+        let mut heap = Heap::new();
 
-        Compiler::compile(source, &mut chunk);
+        Compiler::compile(source, &mut chunk, &mut heap)?;
 
         let mut vm = VM {
-            chunk: &mut chunk,
+            chunk,
             ip: 0,
             stack: Stack::new(),
+            heap,
         };
 
         vm.run()
@@ -138,7 +143,8 @@ impl<'a> VM<'a> {
 
     pub fn run(&mut self) -> VMResult {
         loop {
-            println!("{:?}", self.chunk.disassemble_instruction(self.ip));
+            let instruction = self.chunk.disassemble_instruction(self.ip);
+            println!("{:?}", instruction);
             self.stack.print();
             let opcode = OpCode::from(self.read_byte()?);
             match opcode {
@@ -158,7 +164,22 @@ impl<'a> VM<'a> {
                         ));
                     }
                 }
-                OpCode::OpAdd => self.binary_op(|a, b| Value::Number(a + b))?,
+                OpCode::OpAdd => {
+                    let b = self.stack.pop();
+                    let a = self.stack.pop();
+                    let result = match (a, b) {
+                        (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
+                        (
+                            Value::Object(ObjectRef::String(a)),
+                            Value::Object(ObjectRef::String(b)),
+                        ) => self.concatenate(&a, &b),
+                        _ => {
+                            return self
+                                .runtime_error("Operands must be two numbers or two strings.");
+                        }
+                    };
+                    self.stack.push(result);
+                }
                 OpCode::OpSubtract => self.binary_op(|a, b| Value::Number(a - b))?,
                 OpCode::OpMultiply => self.binary_op(|a, b| Value::Number(a * b))?,
                 OpCode::OpDivide => self.binary_op(|a, b| Value::Number(a / b))?,
@@ -192,7 +213,7 @@ impl<'a> VM<'a> {
 
     fn binary_op<F>(&mut self, op: F) -> VMResult
     where
-        F: FnOnce(f64, f64) -> Value,
+        F: FnOnce(f64, f64) -> Value<'src>,
     {
         let b = self.stack.pop();
         let a = self.stack.pop();
@@ -201,10 +222,13 @@ impl<'a> VM<'a> {
                 self.stack.push(op(a, b));
                 Ok(())
             }
-            _ => Err(VMError::RuntimeError(
-                "Operands must be numbers.".to_string(),
-            )),
+            _ => self.runtime_error("Operands must be numbers."),
         }
+    }
+
+    fn concatenate(&mut self, a: &*const ObjString, b: &*const ObjString) -> Value<'src> {
+        let conc = unsafe { format!("{}{}", &(**a).chars, &(**b).chars) };
+        Value::Object(self.heap.alloc_owned_string(conc))
     }
 
     fn is_falsey(v: Value) -> bool {
@@ -215,17 +239,17 @@ impl<'a> VM<'a> {
         }
     }
 
-    fn read_constant(&self, idx: u8) -> Value {
+    fn read_constant(&self, idx: u8) -> Value<'src> {
         self.chunk.constants[idx as usize]
     }
 
-    fn runtime_error(&mut self, message: &str) -> VMError {
+    fn runtime_error(&mut self, message: &str) -> VMResult {
         eprintln!("{}", message);
         let ip = self.ip - 1;
         let line = self.chunk.get_line(ip);
         eprintln!("[line {line}] in script");
         self.reset_stack();
-        VMError::RuntimeError(format!("{}", message))
+        Err(VMError::RuntimeError(format!("{}", message)))
     }
 
     fn reset_stack(&mut self) {

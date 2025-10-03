@@ -1,9 +1,9 @@
-use core::panic;
+use core::{alloc, panic};
 
 use crate::{
-    common::{ObjString, ObjectRef, Value, alloc_string, opcodes},
+    common::{ObjString, ObjectRef, Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::Chunk,
+    vm::{Chunk, heap::Heap, vm::VMResult},
 };
 
 #[derive(PartialEq, PartialOrd)]
@@ -21,34 +21,36 @@ enum Precedence {
     Primary,
 }
 
-type PrefixFn<'src> = fn(&mut Compiler<'src>);
-type InfixFn<'src> = PrefixFn<'src>;
-type ParseFn<'src> = InfixFn<'src>;
+type PrefixFn<'src, 'a> = fn(&mut Compiler<'src, 'a>);
+type InfixFn<'src, 'a> = PrefixFn<'src, 'a>;
+type ParseFn<'src, 'a> = InfixFn<'src, 'a>;
 
-struct ParseRule<'src> {
-    prefix: Option<PrefixFn<'src>>,
-    infix: Option<InfixFn<'src>>,
+struct ParseRule<'src, 'a> {
+    prefix: Option<PrefixFn<'src, 'a>>,
+    infix: Option<InfixFn<'src, 'a>>,
     precedence: Precedence,
 }
 
 #[derive(Debug)]
-pub struct Compiler<'src> {
+pub struct Compiler<'src, 'a> {
     source: &'src str,
-    chunk: &'src mut Chunk,
+    chunk: &'a mut Chunk<'src>,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
+    heap: &'a mut Heap<'src>,
     had_error: bool,
 }
 
-impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str, chunk: &mut Chunk) {
+impl<'src, 'a> Compiler<'src, 'a> {
+    pub fn compile(source: &'src str, chunk: &mut Chunk<'src>, heap: &mut Heap<'src>) -> VMResult {
         let mut compiler = Compiler {
             source,
-            chunk: chunk,
+            chunk,
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
+            heap,
             had_error: false,
         };
 
@@ -56,6 +58,7 @@ impl<'src> Compiler<'src> {
         compiler.expression();
         compiler.consume(TokenType::EOF, "Expected end of expression");
         compiler.end_compiler();
+        Ok(())
     }
 
     fn advance(&mut self) {
@@ -79,7 +82,7 @@ impl<'src> Compiler<'src> {
         #[cfg(debug_assertions)]
         {
             if !self.had_error {
-                self.chunk.disassemble("code");
+                let _ = self.chunk.disassemble("code");
             }
         }
         self.emit_return()
@@ -94,7 +97,7 @@ impl<'src> Compiler<'src> {
         self.emit_byte(byte2);
     }
 
-    fn emit_const(&mut self, value: Value) {
+    fn emit_const(&mut self, value: Value<'src>) {
         let index = self.chunk.add_constant(value);
         self.emit_byte(opcodes::OpConstant);
         self.emit_byte(index);
@@ -163,10 +166,9 @@ impl<'src> Compiler<'src> {
 
     fn string(&mut self) {
         let lex = self.previous.lexeme;
-        let str = lex[1..lex.len() - 1].to_string();
-        let obj_ref = ObjectRef::String(alloc_string(str));
-
-        self.emit_const(Value::Object(obj_ref));
+        let str = &lex[1..lex.len() - 1];
+        let obj = self.heap.alloc_borrowed_string(str);
+        self.emit_const(Value::Object(obj));
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
@@ -177,7 +179,7 @@ impl<'src> Compiler<'src> {
         if let Some(prefix) = prefix_rule {
             prefix(self);
         } else {
-            self.error_at_current("Expect expression.");
+            self.error_at_current("Expected expression.");
         }
 
         while precedence <= Compiler::get_rule(self.current.kind).precedence {
@@ -201,7 +203,7 @@ impl<'src> Compiler<'src> {
         panic!("Compiler State: {:?}", self);
     }
 
-    fn get_rule(token_type: TokenType) -> ParseRule<'src> {
+    fn get_rule(token_type: TokenType) -> ParseRule<'src, 'a> {
         match token_type {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(Compiler::grouping),

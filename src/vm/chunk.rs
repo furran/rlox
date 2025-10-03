@@ -1,6 +1,6 @@
 use core::{fmt, panic};
 
-use crate::common::{ObjectRef, OpCode, Value};
+use crate::common::{OpCode, Value};
 
 #[derive(Debug)]
 struct LineStart {
@@ -9,13 +9,13 @@ struct LineStart {
 }
 
 #[derive(Debug)]
-pub struct Chunk {
+pub struct Chunk<'src> {
     pub code: Vec<u8>,
-    pub constants: Vec<Value>,
+    pub constants: Vec<Value<'src>>,
     line_starts: Vec<LineStart>,
 }
 
-impl Chunk {
+impl<'src> Chunk<'src> {
     pub fn new() -> Self {
         Chunk {
             code: Vec::new(),
@@ -28,7 +28,7 @@ impl Chunk {
         self.code.push(byte);
     }
 
-    pub fn add_constant(&mut self, value: Value) -> u8 {
+    pub fn add_constant(&mut self, value: Value<'src>) -> u8 {
         self.constants.push(value);
         (self.constants.len() - 1) as u8
     }
@@ -110,7 +110,7 @@ impl Chunk {
     }
 }
 
-impl fmt::Display for Chunk {
+impl fmt::Display for Chunk<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "=== Chunk ===")?;
         for (i, byte) in self.code.iter().enumerate() {

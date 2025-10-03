@@ -1,5 +1,6 @@
 use core::fmt;
 use std::{
+    borrow::Cow,
     fmt::write,
     ops::{Add, Div, Mul, Neg, Sub},
 };
@@ -76,62 +77,78 @@ define_instructions! {
     OpReturn,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ObjectRef {
-    String(*const ObjString),
-    Function(*const ObjFunction),
+#[derive(Clone, Copy, Debug)]
+pub enum ObjectRef<'src> {
+    String(*const ObjString<'src>),
 }
 
-pub struct ObjString {
-    pub chars: String,
+impl<'src> PartialEq for ObjectRef<'src> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ObjectRef::String(a), ObjectRef::String(b)) => unsafe { (**a).chars == (**b).chars },
+            _ => false,
+        }
+    }
 }
 
-pub struct ObjFunction {
-    pub name: Option<String>,
-    pub arity: u8,
-    pub chunk: Chunk,
+#[derive(Debug)]
+pub struct ObjString<'src> {
+    pub chars: Cow<'src, str>,
 }
 
-pub fn alloc_string(chars: String) -> *const ObjString {
-    let boxed = Box::new(ObjString { chars });
-    Box::leak(boxed) as *const ObjString
-}
-
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum Value {
+#[derive(Debug, Copy, Clone)]
+pub enum Value<'src> {
     Nil,
     Number(f64),
     Bool(bool),
-    Object(ObjectRef),
+    Object(ObjectRef<'src>),
 }
 
-impl Default for Value {
+impl<'src> PartialEq for Value<'src> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::Object(a), Value::Object(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Default for Value<'_> {
     fn default() -> Self {
         Value::Nil
     }
 }
 
-impl fmt::Display for Value {
+impl fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Nil => write!(f, "Nil"),
-            Value::Number(x) => write!(f, "{:4}", x),
+            Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
-            Value::Object(obj) => match obj {
-                ObjectRef::String(obj_str_ptr) => {
-                    let str = unsafe { &**obj_str_ptr };
-                    write!(f, "{}", str.chars)
-                }
-                _ => write!(f, ""),
-            },
+            Value::Object(obj) => write!(f, "{}", obj),
         }
     }
 }
 
-impl Neg for Value {
-    type Output = Value;
+impl fmt::Display for ObjectRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectRef::String(obj_str_ptr) => {
+                let str = unsafe { &**obj_str_ptr };
+                write!(f, "\"{}\"", str.chars)
+            }
+            _ => write!(f, ""),
+        }
+    }
+}
 
-    fn neg(self) -> Value {
+impl<'src> Neg for Value<'src> {
+    type Output = Value<'src>;
+
+    fn neg(self) -> Value<'src> {
         match self {
             Value::Number(a) => Value::Number(-a),
             _ => panic!("Operand must be a number."),

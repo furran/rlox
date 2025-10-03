@@ -50,8 +50,8 @@ pub enum TokenType {
 }
 
 #[derive(Debug)]
-pub struct Token<'a> {
-    pub lexeme: &'a str,
+pub struct Token<'src> {
+    pub lexeme: &'src str,
     pub line: usize,
     pub kind: TokenType,
 }
@@ -67,16 +67,16 @@ impl<'src> Default for Token<'src> {
 }
 
 #[derive(Debug)]
-pub struct Scanner<'a> {
-    source: &'a str,
-    bytes: &'a [u8],
+pub struct Scanner<'src> {
+    source: &'src str,
+    bytes: &'src [u8],
     start: usize,
     current: usize,
     line: usize,
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl<'src> Scanner<'src> {
+    pub fn new(source: &'src str) -> Self {
         Self {
             source,
             bytes: source.as_bytes(),
@@ -85,7 +85,7 @@ impl<'a> Scanner<'a> {
             line: 1,
         }
     }
-    pub fn scan_token(&mut self) -> Token<'a> {
+    pub fn scan_token(&mut self) -> Token<'src> {
         self.skip_whitespace();
         self.start = self.current;
 
@@ -164,8 +164,6 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        eprintln!("String: {}", &self.source[self.start..self.current]);
-
         TokenType::String
     }
 
@@ -241,7 +239,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn make_token(&self, kind: TokenType) -> Token<'a> {
+    pub fn make_token(&self, kind: TokenType) -> Token<'src> {
         Token {
             kind,
             lexeme: &self.source[self.start..self.current],
