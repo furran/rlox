@@ -1,7 +1,7 @@
-use core::{alloc, panic};
+use core::panic;
 
 use crate::{
-    common::{ObjString, ObjectRef, Value, opcodes},
+    common::{Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
     vm::{Chunk, heap::Heap, vm::VMResult},
 };

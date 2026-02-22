@@ -123,7 +123,7 @@ impl<'src> VM<'src> {
         Ok(())
     }
 
-    pub fn run_file(source: &String) {}
+    pub fn run_file(_source: &String) {}
 
     pub fn interpret(source: &str) -> VMResult {
         let mut chunk = Chunk::new();
@@ -249,7 +249,7 @@ impl<'src> VM<'src> {
         let line = self.chunk.get_line(ip);
         eprintln!("[line {line}] in script");
         self.reset_stack();
-        Err(VMError::RuntimeError(format!("{}", message)))
+        Err(VMError::RuntimeError(message.to_string()))
     }
 
     fn reset_stack(&mut self) {

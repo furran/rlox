@@ -7,6 +7,6 @@ pub mod vm;
 
 fn main() -> VMResult {
     let result = VM::interpret("3>4\n");
-    VM::repl();
+    let _ = VM::repl();
     result
 }

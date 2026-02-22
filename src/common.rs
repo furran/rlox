@@ -1,11 +1,5 @@
 use core::fmt;
-use std::{
-    borrow::Cow,
-    fmt::write,
-    ops::{Add, Div, Mul, Neg, Sub},
-};
-
-use crate::vm::Chunk;
+use std::{borrow::Cow, ops::Neg};
 
 macro_rules! define_instructions {
     (
@@ -97,7 +91,9 @@ pub struct ObjString<'src> {
 }
 
 #[derive(Debug, Copy, Clone)]
+#[derive(Default)]
 pub enum Value<'src> {
+    #[default]
     Nil,
     Number(f64),
     Bool(bool),
@@ -116,11 +112,6 @@ impl<'src> PartialEq for Value<'src> {
     }
 }
 
-impl Default for Value<'_> {
-    fn default() -> Self {
-        Value::Nil
-    }
-}
 
 impl fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
