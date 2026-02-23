@@ -9,13 +9,13 @@ struct LineStart {
 }
 
 #[derive(Debug)]
-pub struct Chunk<'src> {
+pub struct Chunk {
     pub code: Vec<u8>,
-    pub constants: Vec<Value<'src>>,
+    pub constants: Vec<Value>,
     line_starts: Vec<LineStart>,
 }
 
-impl<'src> Chunk<'src> {
+impl Chunk {
     pub fn new() -> Self {
         Chunk {
             code: Vec::new(),
@@ -28,7 +28,7 @@ impl<'src> Chunk<'src> {
         self.code.push(byte);
     }
 
-    pub fn add_constant(&mut self, value: Value<'src>) -> u8 {
+    pub fn add_constant(&mut self, value: Value) -> u8 {
         self.constants.push(value);
         (self.constants.len() - 1) as u8
     }
@@ -82,7 +82,7 @@ impl<'src> Chunk<'src> {
                 let operand = self.code[offset + 1];
                 match opcode {
                     OpCode::OpConstant => {
-                        let value = self.constants[operand as usize];
+                        let value = self.constants[operand as usize].clone();
                         println!("{:?} {} ", opcode, value);
                     }
                     _ => println!("{:?} {:4} ", opcode, operand),
@@ -110,8 +110,8 @@ impl<'src> Chunk<'src> {
     }
 }
 
-impl fmt::Display for Chunk<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Chunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         writeln!(f, "=== Chunk ===")?;
         for (i, byte) in self.code.iter().enumerate() {
             writeln!(f, "{:04} {:?}", i, byte)?;

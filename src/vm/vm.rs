@@ -1,9 +1,9 @@
-use std::{io::Write, mem};
+use std::{collections::HashMap, io::Write, mem};
 
 use crate::{
-    common::{ObjString, ObjectRef, OpCode, Value},
+    common::{ObjString, OpCode, Value, alloc_owned_string},
     compiler::Compiler,
-    vm::{chunk::Chunk, heap::Heap},
+    vm::chunk::Chunk,
 };
 
 #[derive(Debug)]
@@ -84,14 +84,14 @@ where
 }
 
 #[derive(Debug)]
-pub struct VM<'src> {
-    chunk: Chunk<'src>,
+pub struct VM {
+    chunk: Chunk,
     ip: usize,
-    stack: Stack<Value<'src>, 256>,
-    heap: Heap<'src>,
+    stack: Stack<Value, 256>,
+    strings: HashMap<ObjString, Value>,
 }
 
-impl<'src> VM<'src> {
+impl VM {
     pub fn repl() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
@@ -127,15 +127,14 @@ impl<'src> VM<'src> {
 
     pub fn interpret(source: &str) -> VMResult {
         let mut chunk = Chunk::new();
-        let mut heap = Heap::new();
 
-        Compiler::compile(source, &mut chunk, &mut heap)?;
+        Compiler::compile(source, &mut chunk)?;
 
         let mut vm = VM {
             chunk,
             ip: 0,
             stack: Stack::new(),
-            heap,
+            strings: HashMap::new(),
         };
 
         vm.run()
@@ -169,10 +168,9 @@ impl<'src> VM<'src> {
                     let a = self.stack.pop();
                     let result = match (a, b) {
                         (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-                        (
-                            Value::Object(ObjectRef::String(a)),
-                            Value::Object(ObjectRef::String(b)),
-                        ) => self.concatenate(&a, &b),
+                        (Value::String(a), Value::String(b)) => {
+                            self.concatenate(a.as_ptr(), b.as_ptr())
+                        }
                         _ => {
                             return self
                                 .runtime_error("Operands must be two numbers or two strings.");
@@ -213,7 +211,7 @@ impl<'src> VM<'src> {
 
     fn binary_op<F>(&mut self, op: F) -> VMResult
     where
-        F: FnOnce(f64, f64) -> Value<'src>,
+        F: FnOnce(f64, f64) -> Value,
     {
         let b = self.stack.pop();
         let a = self.stack.pop();
@@ -226,9 +224,9 @@ impl<'src> VM<'src> {
         }
     }
 
-    fn concatenate(&mut self, a: &*const ObjString, b: &*const ObjString) -> Value<'src> {
-        let conc = unsafe { format!("{}{}", &(**a).chars, &(**b).chars) };
-        Value::Object(self.heap.alloc_owned_string(conc))
+    fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {
+        let conc = unsafe { format!("{}{}", (*a).chars, (*b).chars) };
+        Value::String(alloc_owned_string(conc))
     }
 
     fn is_falsey(v: Value) -> bool {
@@ -239,7 +237,7 @@ impl<'src> VM<'src> {
         }
     }
 
-    fn read_constant(&self, idx: u8) -> Value<'src> {
+    fn read_constant(&self, idx: u8) -> Value {
         self.chunk.constants[idx as usize]
     }
 

@@ -1,9 +1,9 @@
 use core::panic;
 
 use crate::{
-    common::{Value, opcodes},
+    common::{Value, alloc_owned_string, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::{Chunk, heap::Heap, vm::VMResult},
+    vm::{Chunk, vm::VMResult},
 };
 
 #[derive(PartialEq, PartialOrd)]
@@ -34,23 +34,21 @@ struct ParseRule<'src, 'a> {
 #[derive(Debug)]
 pub struct Compiler<'src, 'a> {
     source: &'src str,
-    chunk: &'a mut Chunk<'src>,
+    chunk: &'a mut Chunk,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
-    heap: &'a mut Heap<'src>,
     had_error: bool,
 }
 
 impl<'src, 'a> Compiler<'src, 'a> {
-    pub fn compile(source: &'src str, chunk: &mut Chunk<'src>, heap: &mut Heap<'src>) -> VMResult {
+    pub fn compile(source: &'src str, chunk: &mut Chunk) -> VMResult {
         let mut compiler = Compiler {
             source,
             chunk,
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
-            heap,
             had_error: false,
         };
 
@@ -97,7 +95,7 @@ impl<'src, 'a> Compiler<'src, 'a> {
         self.emit_byte(byte2);
     }
 
-    fn emit_const(&mut self, value: Value<'src>) {
+    fn emit_const(&mut self, value: Value) {
         let index = self.chunk.add_constant(value);
         self.emit_byte(opcodes::OpConstant);
         self.emit_byte(index);
@@ -167,8 +165,8 @@ impl<'src, 'a> Compiler<'src, 'a> {
     fn string(&mut self) {
         let lex = self.previous.lexeme;
         let str = &lex[1..lex.len() - 1];
-        let obj = self.heap.alloc_borrowed_string(str);
-        self.emit_const(Value::Object(obj));
+        let obj = alloc_owned_string(str.to_string());
+        self.emit_const(Value::String(obj));
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
