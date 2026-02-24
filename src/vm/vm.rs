@@ -126,9 +126,7 @@ impl VM {
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(source: &str) -> VMResult {
-        let mut chunk = Chunk::new();
-
-        Compiler::compile(source, &mut chunk)?;
+        let chunk = Compiler::compile(source);
 
         let mut vm = VM {
             chunk,
@@ -140,7 +138,7 @@ impl VM {
         vm.run()
     }
 
-    pub fn run(&mut self) -> VMResult {
+    fn run(&mut self) -> VMResult {
         loop {
             let instruction = self.chunk.disassemble_instruction(self.ip);
             println!("{:?}", instruction);
@@ -158,9 +156,7 @@ impl VM {
                     if let Value::Number(val) = value {
                         self.stack.push(Value::Number(-val));
                     } else {
-                        return Err(VMError::RuntimeError(
-                            "Operand must be a number.".to_string(),
-                        ));
+                        return self.runtime_error("Operand must be a number.");
                     }
                 }
                 OpCode::OpAdd => {

@@ -3,7 +3,7 @@ use core::panic;
 use crate::{
     common::{Value, alloc_owned_string, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::{Chunk, vm::VMResult},
+    vm::{Chunk, vm::VMError},
 };
 
 #[derive(PartialEq, PartialOrd)]
@@ -21,31 +21,31 @@ enum Precedence {
     Primary,
 }
 
-type PrefixFn<'src, 'a> = fn(&mut Compiler<'src, 'a>);
-type InfixFn<'src, 'a> = PrefixFn<'src, 'a>;
-type ParseFn<'src, 'a> = InfixFn<'src, 'a>;
+type PrefixFn<'src> = fn(&mut Compiler<'src>);
+type InfixFn<'src> = PrefixFn<'src>;
+type ParseFn<'src> = InfixFn<'src>;
 
-struct ParseRule<'src, 'a> {
-    prefix: Option<PrefixFn<'src, 'a>>,
-    infix: Option<InfixFn<'src, 'a>>,
+struct ParseRule<'src> {
+    prefix: Option<PrefixFn<'src>>,
+    infix: Option<InfixFn<'src>>,
     precedence: Precedence,
 }
 
 #[derive(Debug)]
-pub struct Compiler<'src, 'a> {
+pub struct Compiler<'src> {
     source: &'src str,
-    chunk: &'a mut Chunk,
+    chunk: Chunk,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
     had_error: bool,
 }
 
-impl<'src, 'a> Compiler<'src, 'a> {
-    pub fn compile(source: &'src str, chunk: &mut Chunk) -> VMResult {
+impl<'src> Compiler<'src> {
+    pub fn compile(source: &'src str) -> Chunk {
         let mut compiler = Compiler {
             source,
-            chunk,
+            chunk: Chunk::new(),
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
@@ -56,7 +56,7 @@ impl<'src, 'a> Compiler<'src, 'a> {
         compiler.expression();
         compiler.consume(TokenType::EOF, "Expected end of expression");
         compiler.end_compiler();
-        Ok(())
+        compiler.chunk
     }
 
     fn advance(&mut self) {
@@ -201,7 +201,7 @@ impl<'src, 'a> Compiler<'src, 'a> {
         panic!("Compiler State: {:?}", self);
     }
 
-    fn get_rule(token_type: TokenType) -> ParseRule<'src, 'a> {
+    fn get_rule(token_type: TokenType) -> ParseRule<'src> {
         match token_type {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(Compiler::grouping),
