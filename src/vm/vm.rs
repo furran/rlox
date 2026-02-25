@@ -1,9 +1,9 @@
-use std::{collections::HashMap, io::Write, mem};
+use std::{io::Write, mem};
 
 use crate::{
     common::{ObjString, OpCode, Value, alloc_owned_string},
     compiler::Compiler,
-    vm::chunk::Chunk,
+    vm::{Interner, chunk::Chunk},
 };
 
 #[derive(Debug)]
@@ -88,13 +88,23 @@ pub struct VM {
     chunk: Chunk,
     ip: usize,
     stack: Stack<Value, 256>,
-    strings: HashMap<ObjString, Value>,
+    interner: Interner,
 }
 
 impl VM {
+    fn new() -> Self {
+        Self {
+            chunk: Chunk::new(),
+            ip: 0,
+            stack: Stack::new(),
+            interner: Interner::new(),
+        }
+    }
+
     pub fn repl() -> std::io::Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
+        let mut vm = VM::new();
 
         loop {
             print!("> ");
@@ -105,37 +115,30 @@ impl VM {
             match stdin.read_line(&mut line) {
                 Ok(0) => {
                     println!();
-                    break;
+                    return Ok(());
                 }
                 Ok(_) => {
                     let line = line.trim_end();
-                    if let Err(e) = VM::interpret(line) {
+                    if let Err(e) = vm.interpret(line) {
                         eprintln!("Error: {:?}", e);
                     }
                 }
                 Err(e) => {
                     eprintln!("Error reading input: {}", e);
-                    break;
+                    return Err(e);
                 }
             }
+            println!("{:?}", vm.interner);
         }
-
-        Ok(())
     }
 
     pub fn run_file(_source: &String) {}
 
-    pub fn interpret(source: &str) -> VMResult {
-        let chunk = Compiler::compile(source);
+    pub fn interpret(&mut self, source: &str) -> VMResult {
+        self.chunk = Compiler::compile(source, &mut self.interner);
+        self.ip = 0;
 
-        let mut vm = VM {
-            chunk,
-            ip: 0,
-            stack: Stack::new(),
-            strings: HashMap::new(),
-        };
-
-        vm.run()
+        self.run()
     }
 
     fn run(&mut self) -> VMResult {
@@ -164,9 +167,7 @@ impl VM {
                     let a = self.stack.pop();
                     let result = match (a, b) {
                         (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-                        (Value::String(a), Value::String(b)) => {
-                            self.concatenate(a.as_ptr(), b.as_ptr())
-                        }
+                        (Value::String(a), Value::String(b)) => self.concatenate(a, b),
                         _ => {
                             return self
                                 .runtime_error("Operands must be two numbers or two strings.");
@@ -221,8 +222,9 @@ impl VM {
     }
 
     fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {
-        let conc = unsafe { format!("{}{}", (*a).chars, (*b).chars) };
-        Value::String(alloc_owned_string(conc))
+        let conc = unsafe { format!("{}{}", (*a).str, (*b).str) };
+        let str = self.intern(&conc);
+        Value::String(str)
     }
 
     fn is_falsey(v: Value) -> bool {
@@ -248,5 +250,9 @@ impl VM {
 
     fn reset_stack(&mut self) {
         self.stack.top = 0;
+    }
+
+    pub fn intern(&mut self, e: &str) -> *const ObjString {
+        self.interner.intern(e)
     }
 }

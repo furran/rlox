@@ -3,7 +3,7 @@ use core::panic;
 use crate::{
     common::{Value, alloc_owned_string, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::{Chunk, vm::VMError},
+    vm::{Chunk, Interner, interner, vm::VMError},
 };
 
 #[derive(PartialEq, PartialOrd)]
@@ -38,17 +38,19 @@ pub struct Compiler<'src> {
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
+    interner: &'src mut Interner,
     had_error: bool,
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str) -> Chunk {
+    pub fn compile(source: &'src str, interner: &mut Interner) -> Chunk {
         let mut compiler = Compiler {
             source,
             chunk: Chunk::new(),
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
+            interner,
             had_error: false,
         };
 
@@ -165,7 +167,8 @@ impl<'src> Compiler<'src> {
     fn string(&mut self) {
         let lex = self.previous.lexeme;
         let str = &lex[1..lex.len() - 1];
-        let obj = alloc_owned_string(str.to_string());
+        // let obj = alloc_owned_string(str.to_string());
+        let obj = self.interner.intern(str);
         self.emit_const(Value::String(obj));
     }
 

@@ -1,5 +1,10 @@
 use core::fmt;
-use std::{borrow::Cow, ops::Neg, ptr::NonNull};
+use std::{
+    borrow::{Borrow, Cow},
+    hash::Hash,
+    ops::Neg,
+    ptr::NonNull,
+};
 
 macro_rules! define_instructions {
     (
@@ -73,11 +78,30 @@ define_instructions! {
 
 #[derive(Debug, Clone)]
 pub struct ObjString {
-    pub chars: String,
+    pub str: String,
+}
+impl PartialEq for ObjString {
+    fn eq(&self, other: &Self) -> bool {
+        self.str == other.str
+    }
+}
+
+impl Eq for ObjString {}
+
+impl Hash for ObjString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.str.hash(state);
+    }
+}
+
+impl Borrow<str> for Box<ObjString> {
+    fn borrow(&self) -> &str {
+        &self.str
+    }
 }
 
 pub fn alloc_owned_string(chars: String) -> NonNull<ObjString> {
-    let boxed = Box::new(ObjString { chars });
+    let boxed = Box::new(ObjString { str: chars });
 
     let ptr = Box::leak(boxed);
 
@@ -90,7 +114,7 @@ pub enum Value {
     Nil,
     Number(f64),
     Bool(bool),
-    String(NonNull<ObjString>),
+    String(*const ObjString),
 }
 
 impl PartialEq for Value {
@@ -99,9 +123,7 @@ impl PartialEq for Value {
             (Value::Nil, Value::Nil) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::String(a), Value::String(b)) => unsafe {
-                (*a.as_ptr()).chars == (*b.as_ptr()).chars
-            },
+            (Value::String(a), Value::String(b)) => unsafe { (**a).str == (**b).str },
             _ => false,
         }
     }
@@ -113,7 +135,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "Nil"),
             Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
-            Value::String(obj) => write!(f, "{}", unsafe { &(*obj.as_ptr()).chars }),
+            Value::String(obj) => write!(f, "{}", unsafe { &(**obj).str }),
         }
     }
 }
