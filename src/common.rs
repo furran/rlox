@@ -73,6 +73,8 @@ define_instructions! {
     OpEqual,
     OpGreater,
     OpLess,
+    OpPrint,
+    OpPop,
     OpReturn,
 }
 

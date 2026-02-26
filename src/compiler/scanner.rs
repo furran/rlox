@@ -141,6 +141,8 @@ impl<'src> Scanner<'src> {
             _ => TokenType::Error,
         };
 
+        println!("token_type: {:?}", token_type);
+
         self.make_token(token_type)
     }
 

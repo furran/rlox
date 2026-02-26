@@ -33,30 +33,31 @@ struct ParseRule<'src> {
 
 #[derive(Debug)]
 pub struct Compiler<'src> {
-    source: &'src str,
     chunk: Chunk,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
     interner: &'src mut Interner,
     had_error: bool,
+    panic_mode: bool,
 }
 
 impl<'src> Compiler<'src> {
     pub fn compile(source: &'src str, interner: &mut Interner) -> Chunk {
         let mut compiler = Compiler {
-            source,
             chunk: Chunk::new(),
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
             interner,
             had_error: false,
+            panic_mode: false,
         };
 
         compiler.advance();
-        compiler.expression();
-        compiler.consume(TokenType::EOF, "Expected end of expression");
+        while !compiler.matches(TokenType::EOF) {
+            compiler.declaration();
+        }
         compiler.end_compiler();
         compiler.chunk
     }
@@ -76,6 +77,18 @@ impl<'src> Compiler<'src> {
         } else {
             self.error_at_current(message);
         }
+    }
+
+    fn check_token_type(&self, kind: TokenType) -> bool {
+        self.current.kind == kind
+    }
+
+    fn matches(&mut self, kind: TokenType) -> bool {
+        if !self.check_token_type(kind) {
+            return false;
+        }
+        self.advance();
+        true
     }
 
     fn end_compiler(&mut self) {
@@ -109,6 +122,30 @@ impl<'src> Compiler<'src> {
 
     fn expression(&mut self) {
         self.parse_precedence(Precedence::Assignment)
+    }
+
+    fn expression_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expected ';' after expression.");
+        self.emit_byte(opcodes::OpPop);
+    }
+
+    fn print_statement(&mut self) {
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expected ';' after value.");
+        self.emit_byte(opcodes::OpPrint);
+    }
+
+    fn declaration(&mut self) {
+        self.statement();
+    }
+
+    fn statement(&mut self) {
+        if self.matches(TokenType::Print) {
+            self.print_statement();
+        } else {
+            self.expression_statement();
+        }
     }
 
     fn grouping(&mut self) {
@@ -190,7 +227,12 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn error_at_current(&self, message: &str) {
+    fn error_at_current(&mut self, message: &str) {
+        if self.panic_mode {
+            return;
+        }
+        self.panic_mode = true;
+        self.had_error = true;
         let token = &self.previous;
         eprint!("[line {}] Error", token.line);
         if token.kind == TokenType::EOF {
@@ -200,8 +242,6 @@ impl<'src> Compiler<'src> {
             eprint!(" at '{}'", token.lexeme);
         }
         eprintln!(": {message}");
-
-        panic!("Compiler State: {:?}", self);
     }
 
     fn get_rule(token_type: TokenType) -> ParseRule<'src> {

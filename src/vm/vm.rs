@@ -143,8 +143,7 @@ impl VM {
 
     fn run(&mut self) -> VMResult {
         loop {
-            let instruction = self.chunk.disassemble_instruction(self.ip);
-            println!("{:?}", instruction);
+            let _ = self.chunk.disassemble_instruction(self.ip);
             self.stack.print();
             let opcode = OpCode::from(self.read_byte()?);
             match opcode {
@@ -192,15 +191,19 @@ impl VM {
                 }
                 OpCode::OpGreater => self.binary_op(|a, b| Value::Bool(a > b))?,
                 OpCode::OpLess => self.binary_op(|a, b| Value::Bool(a < b))?,
-                OpCode::OpReturn => return Ok(()),
+                OpCode::OpPrint => println!("{}", self.stack.pop()),
+                OpCode::OpPop => {
+                    self.stack.pop();
+                }
+                OpCode::OpReturn => {
+                    return Ok(());
+                }
             }
         }
     }
 
     fn read_byte(&mut self) -> Result<u8, VMError> {
-        let chunk = &self.chunk;
-
-        let byte = chunk.code[self.ip];
+        let byte = self.chunk.code[self.ip];
         self.ip += 1;
 
         Ok(byte)
