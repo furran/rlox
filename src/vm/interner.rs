@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+};
 
 use crate::common::ObjString;
 
@@ -22,5 +25,9 @@ impl Interner {
         let ptr = obj.as_ref() as *const ObjString;
         self.set.insert(obj);
         ptr
+    }
+
+    pub fn get(&self, e: &str) -> Option<&Box<ObjString>> {
+        self.set.get(e)
     }
 }

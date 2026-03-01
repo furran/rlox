@@ -1,3 +1,5 @@
+use core::panic::PanicMessage;
+
 use crate::{
     common::{ObjString, Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
@@ -125,7 +127,17 @@ impl<'src> Compiler<'src> {
     }
 
     fn identifier_constant(&mut self, name: &str) -> u8 {
-        let ptr = self.interner.intern(name);
+        if let Some(x) = self.interner.get(name) {
+            for (index, constant) in self.chunk.constants.iter().enumerate() {
+                if let Value::String(name) = constant {
+                    let ptr = x.as_ref() as *const ObjString;
+                    if *name == ptr {
+                        return index as u8;
+                    }
+                }
+            }
+        }
+        let ptr = self.intern(name);
         self.chunk.add_constant(Value::String(ptr))
     }
 
