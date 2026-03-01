@@ -76,6 +76,8 @@ define_instructions! {
     OpPrint,
     OpPop,
     OpReturn,
+
+    OpDefineGlobal(index: u8),
 }
 
 #[derive(Debug, Clone)]
@@ -125,7 +127,7 @@ impl PartialEq for Value {
             (Value::Nil, Value::Nil) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::String(a), Value::String(b)) => unsafe { (**a).str == (**b).str },
+            (Value::String(a), Value::String(b)) => a == b,
             _ => false,
         }
     }

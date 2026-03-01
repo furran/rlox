@@ -1,4 +1,8 @@
-use std::{io::Write, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Write,
+    mem,
+};
 
 use crate::{
     common::{ObjString, OpCode, Value, alloc_owned_string},
@@ -89,6 +93,7 @@ pub struct VM {
     ip: usize,
     stack: Stack<Value, 256>,
     interner: Interner,
+    globals: HashMap<*const ObjString, Value>,
 }
 
 impl VM {
@@ -98,6 +103,7 @@ impl VM {
             ip: 0,
             stack: Stack::new(),
             interner: Interner::new(),
+            globals: HashMap::new(),
         }
     }
 
@@ -129,6 +135,7 @@ impl VM {
                 }
             }
             println!("{:?}", vm.interner);
+            println!("{:?}", vm.globals);
         }
     }
 
@@ -145,10 +152,10 @@ impl VM {
         loop {
             let _ = self.chunk.disassemble_instruction(self.ip);
             self.stack.print();
-            let opcode = OpCode::from(self.read_byte()?);
+            let opcode = OpCode::from(self.read_byte());
             match opcode {
                 OpCode::OpConstant => {
-                    let idx = self.read_byte()?;
+                    let idx = self.read_byte();
                     let constant = self.read_constant(idx);
                     self.stack.push(constant);
                     println!("{:?}", constant);
@@ -198,15 +205,22 @@ impl VM {
                 OpCode::OpReturn => {
                     return Ok(());
                 }
+                OpCode::OpDefineGlobal => {
+                    let index = self.read_byte();
+                    let obj = self.read_constant(index);
+                    if let Value::String(name) = obj {
+                        self.globals.insert(name, self.stack.pop());
+                    }
+                }
             }
         }
     }
 
-    fn read_byte(&mut self) -> Result<u8, VMError> {
+    fn read_byte(&mut self) -> u8 {
         let byte = self.chunk.code[self.ip];
         self.ip += 1;
 
-        Ok(byte)
+        byte
     }
 
     fn binary_op<F>(&mut self, op: F) -> VMResult

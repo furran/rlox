@@ -1,7 +1,7 @@
-use core::panic;
+use core::{fmt, panic};
 
 use crate::{
-    common::{Value, alloc_owned_string, opcodes},
+    common::{ObjString, OpCode, Value, alloc_owned_string, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
     vm::{Chunk, Interner, interner, vm::VMError},
 };
@@ -124,6 +124,32 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Precedence::Assignment)
     }
 
+    fn parse_variable(&mut self, message: &str) -> u8 {
+        self.consume(TokenType::Identifier, message);
+        let ptr = self.interner.intern(self.previous.lexeme);
+        self.chunk.add_constant(Value::String(ptr))
+    }
+
+    fn define_variable(&mut self, global: u8) {
+        self.emit_bytes(opcodes::OpDefineGlobal, global);
+    }
+
+    fn var_declaration(&mut self) {
+        let global = self.parse_variable("Expected variable name.");
+        if self.matches(TokenType::Equal) {
+            self.expression();
+        } else {
+            self.emit_byte(opcodes::OpNil);
+        }
+
+        self.consume(
+            TokenType::Semicolon,
+            "Expected ';' after variable declaration.",
+        );
+
+        self.define_variable(global);
+    }
+
     fn expression_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expected ';' after expression.");
@@ -136,8 +162,37 @@ impl<'src> Compiler<'src> {
         self.emit_byte(opcodes::OpPrint);
     }
 
+    fn synchronize(&mut self) {
+        self.panic_mode = false;
+        while self.current.kind != TokenType::EOF {
+            if self.previous.kind == TokenType::Semicolon {
+                return;
+            }
+            match self.current.kind {
+                TokenType::Class
+                | TokenType::Fun
+                | TokenType::Var
+                | TokenType::For
+                | TokenType::If
+                | TokenType::While
+                | TokenType::Print
+                | TokenType::Return => return,
+                _ => {}
+            }
+            self.advance();
+        }
+    }
+
     fn declaration(&mut self) {
-        self.statement();
+        if self.matches(TokenType::Var) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
+
+        if self.panic_mode {
+            self.synchronize();
+        }
     }
 
     fn statement(&mut self) {
@@ -315,5 +370,9 @@ impl<'src> Compiler<'src> {
                 precedence: Precedence::None,
             },
         }
+    }
+
+    pub fn intern(&mut self, e: &str) -> *const ObjString {
+        self.interner.intern(e)
     }
 }
