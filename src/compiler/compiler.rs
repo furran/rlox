@@ -1,9 +1,7 @@
-use core::panic::PanicMessage;
-
 use crate::{
-    common::{ObjString, Value, opcodes},
+    common::{ObjString, ObjStringPtr, Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::{Chunk, Interner},
+    vm::{Chunk, Interner, vm::GlobalIndices},
 };
 
 #[derive(PartialEq, PartialOrd)]
@@ -38,19 +36,25 @@ pub struct Compiler<'src> {
     previous: Token<'src>,
     current: Token<'src>,
     interner: &'src mut Interner,
+    global_indices: &'src mut GlobalIndices,
     can_assign: bool,
     had_error: bool,
     panic_mode: bool,
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str, interner: &mut Interner) -> Chunk {
+    pub fn compile(
+        source: &'src str,
+        interner: &mut Interner,
+        global_indices: &mut GlobalIndices,
+    ) -> Chunk {
         let mut compiler = Compiler {
             chunk: Chunk::new(),
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
             interner,
+            global_indices,
             can_assign: false,
             had_error: false,
             panic_mode: false,
@@ -126,24 +130,19 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Precedence::Assignment)
     }
 
-    fn identifier_constant(&mut self, name: &str) -> u8 {
-        if let Some(x) = self.interner.get(name) {
-            for (index, constant) in self.chunk.constants.iter().enumerate() {
-                if let Value::String(name) = constant {
-                    let ptr = x.as_ref() as *const ObjString;
-                    if *name == ptr {
-                        return index as u8;
-                    }
-                }
-            }
+    fn global_slot(&mut self, name: &str) -> u8 {
+        let obj_string = ObjStringPtr(self.intern(name));
+        if let Some(slot) = self.global_indices.get(&obj_string) {
+            return *slot;
         }
-        let ptr = self.intern(name);
-        self.chunk.add_constant(Value::String(ptr))
+        let slot = self.global_indices.len() as u8;
+        self.global_indices.insert(obj_string, slot);
+        slot
     }
 
     fn parse_variable(&mut self, message: &str) -> u8 {
         self.consume(TokenType::Identifier, message);
-        self.identifier_constant(self.previous.lexeme)
+        self.global_slot(self.previous.lexeme)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -273,7 +272,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn variable(&mut self) {
-        let arg = self.identifier_constant(self.previous.lexeme);
+        let arg = self.global_slot(self.previous.lexeme);
 
         if self.can_assign && self.matches(TokenType::Equal) {
             self.expression();

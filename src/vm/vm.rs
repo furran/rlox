@@ -1,25 +1,15 @@
 use std::{
     collections::HashMap,
-    fmt::Display,
-    hash::{Hash, Hasher},
     io::Write,
     mem::{self},
+    ops::{Deref, DerefMut},
 };
 
 use crate::{
-    common::{ObjString, OpCode, Value},
+    common::{ObjString, ObjStringPtr, OpCode, Value},
     compiler::Compiler,
     vm::{Interner, chunk::Chunk},
 };
-
-#[derive(Debug, PartialEq, Eq)]
-struct ObjStringPtr(*const ObjString);
-
-impl Hash for ObjStringPtr {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
 
 #[derive(Debug)]
 pub enum VMError {
@@ -98,13 +88,31 @@ where
     }
 }
 
+#[derive(Debug, Default)]
+pub struct GlobalIndices(pub HashMap<ObjStringPtr, u8>);
+
+impl Deref for GlobalIndices {
+    type Target = HashMap<ObjStringPtr, u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for GlobalIndices {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Debug)]
 pub struct VM {
     chunk: Chunk,
     ip: usize,
     stack: Stack<Value, 256>,
     interner: Interner,
-    globals: HashMap<ObjStringPtr, Value>,
+    globals: Vec<Value>,
+    global_indices: GlobalIndices,
 }
 
 impl VM {
@@ -114,7 +122,8 @@ impl VM {
             ip: 0,
             stack: Stack::new(),
             interner: Interner::new(),
-            globals: HashMap::new(),
+            globals: Vec::new(),
+            global_indices: GlobalIndices::default(),
         }
     }
 
@@ -153,7 +162,7 @@ impl VM {
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
-        self.chunk = Compiler::compile(source, &mut self.interner);
+        self.chunk = Compiler::compile(source, &mut self.interner, &mut self.global_indices);
         self.ip = 0;
 
         self.run()
@@ -217,35 +226,27 @@ impl VM {
                     return Ok(());
                 }
                 OpCode::OpDefineGlobal => {
-                    let index = self.read_byte();
-                    let obj = self.read_constant(index);
-                    if let Value::String(name) = obj {
-                        self.globals.insert(ObjStringPtr(name), self.stack.pop());
+                    let slot = self.read_byte() as usize;
+                    let value = self.stack.pop();
+                    if slot >= self.globals.len() {
+                        self.globals.resize(slot + 1, Value::Nil);
                     }
+                    self.globals[slot] = value;
                 }
                 OpCode::OpGetGlobal => {
-                    let index = self.read_byte();
-                    let obj = self.read_constant(index);
-                    if let Some(name) = obj.as_obj_string() {
-                        let global = self.globals.get(&ObjStringPtr(name));
-                        if let Some(val) = global {
-                            self.stack.push(*val);
-                        } else {
-                            return self.runtime_error(format!("Undefined variable '{}'.", name));
-                        }
+                    let slot = self.read_byte() as usize;
+                    if let Some(value) = self.globals.get(slot) {
+                        self.stack.push(*value)
+                    } else {
+                        return self.runtime_error("Undefined variable.");
                     }
                 }
                 OpCode::OpSetGlobal => {
-                    let index = self.read_byte();
-                    let obj = self.read_constant(index);
-                    if let Some(name) = obj.as_obj_string() {
-                        if self.globals.get(&ObjStringPtr(name)) == None {
-                            self.globals.remove(&ObjStringPtr(name));
-                            return self.runtime_error(format!("Undefined variable '{}'.", name));
-                        } else {
-                            self.globals.insert(ObjStringPtr(name), self.stack.peek(0));
-                        }
+                    let slot = self.read_byte() as usize;
+                    if slot >= self.globals.len() {
+                        return self.runtime_error("Undefined variable.");
                     }
+                    self.globals[slot] = self.stack.peek(0);
                 }
             }
         }

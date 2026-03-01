@@ -1,9 +1,8 @@
 use core::fmt;
 use std::{
     borrow::Borrow,
-    hash::Hash,
+    hash::{Hash, Hasher},
     ops::{Deref, Neg},
-    ptr::NonNull,
 };
 
 macro_rules! define_instructions {
@@ -120,12 +119,13 @@ impl Borrow<str> for Box<ObjString> {
     }
 }
 
-pub fn alloc_owned_string(chars: String) -> NonNull<ObjString> {
-    let boxed = Box::new(ObjString { str: chars });
+#[derive(Debug, PartialEq, Eq)]
+pub struct ObjStringPtr(pub *const ObjString);
 
-    let ptr = Box::leak(boxed);
-
-    unsafe { NonNull::new_unchecked(ptr) }
+impl Hash for ObjStringPtr {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]

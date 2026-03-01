@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-};
+use std::collections::HashSet;
 
 use crate::common::ObjString;
 
