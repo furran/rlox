@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
     io::Write,
     mem,
 };
@@ -9,6 +10,15 @@ use crate::{
     compiler::Compiler,
     vm::{Interner, chunk::Chunk},
 };
+
+#[derive(Debug, PartialEq, Eq)]
+struct ObjStringPtr(*const ObjString);
+
+impl Hash for ObjStringPtr {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
 
 #[derive(Debug)]
 pub enum VMError {
@@ -93,7 +103,7 @@ pub struct VM {
     ip: usize,
     stack: Stack<Value, 256>,
     interner: Interner,
-    globals: HashMap<*const ObjString, Value>,
+    globals: HashMap<ObjStringPtr, Value>,
 }
 
 impl VM {
@@ -150,7 +160,7 @@ impl VM {
 
     fn run(&mut self) -> VMResult {
         loop {
-            let _ = self.chunk.disassemble_instruction(self.ip);
+            // let _ = self.chunk.disassemble_instruction(self.ip);
             self.stack.print();
             let opcode = OpCode::from(self.read_byte());
             match opcode {
@@ -209,7 +219,19 @@ impl VM {
                     let index = self.read_byte();
                     let obj = self.read_constant(index);
                     if let Value::String(name) = obj {
-                        self.globals.insert(name, self.stack.pop());
+                        self.globals.insert(ObjStringPtr(name), self.stack.pop());
+                    }
+                }
+                OpCode::OpGetGlobal => {
+                    let index = self.read_byte();
+                    let obj = self.read_constant(index);
+                    if let Some(name) = obj.as_obj_string() {
+                        let global = self.globals.get(&ObjStringPtr(name));
+                        if let Some(val) = global {
+                            self.stack.push(*val);
+                        } else {
+                            return self.runtime_error(format!("Undefined variable '{}'", name));
+                        }
                     }
                 }
             }
@@ -256,13 +278,14 @@ impl VM {
         self.chunk.constants[idx as usize]
     }
 
-    fn runtime_error(&mut self, message: &str) -> VMResult {
+    fn runtime_error(&mut self, message: impl Into<String>) -> VMResult {
+        let message = message.into();
         eprintln!("{}", message);
         let ip = self.ip - 1;
         let line = self.chunk.get_line(ip);
         eprintln!("[line {line}] in script");
         self.reset_stack();
-        Err(VMError::RuntimeError(message.to_string()))
+        Err(VMError::RuntimeError(message))
     }
 
     fn reset_stack(&mut self) {

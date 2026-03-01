@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     borrow::{Borrow, Cow},
     hash::Hash,
-    ops::Neg,
+    ops::{Deref, Neg},
     ptr::NonNull,
 };
 
@@ -78,12 +78,27 @@ define_instructions! {
     OpReturn,
 
     OpDefineGlobal(index: u8),
+    OpGetGlobal(index: u8)
 }
 
 #[derive(Debug, Clone)]
 pub struct ObjString {
     pub str: String,
 }
+
+impl Deref for ObjString {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.str
+    }
+}
+
+impl fmt::Display for ObjString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.str.fmt(f)
+    }
+}
+
 impl PartialEq for ObjString {
     fn eq(&self, other: &Self) -> bool {
         self.str == other.str
@@ -119,6 +134,16 @@ pub enum Value {
     Number(f64),
     Bool(bool),
     String(*const ObjString),
+}
+
+impl Value {
+    pub fn as_obj_string(&self) -> Option<&ObjString> {
+        if let Value::String(ptr) = self {
+            Some(unsafe { &**ptr })
+        } else {
+            None
+        }
+    }
 }
 
 impl PartialEq for Value {

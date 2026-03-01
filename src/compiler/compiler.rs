@@ -124,10 +124,14 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Precedence::Assignment)
     }
 
+    fn identifier_constant(&mut self, name: &str) -> u8 {
+        let ptr = self.interner.intern(name);
+        self.chunk.add_constant(Value::String(ptr))
+    }
+
     fn parse_variable(&mut self, message: &str) -> u8 {
         self.consume(TokenType::Identifier, message);
-        let ptr = self.interner.intern(self.previous.lexeme);
-        self.chunk.add_constant(Value::String(ptr))
+        self.identifier_constant(self.previous.lexeme)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -256,6 +260,11 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    fn variable(&mut self) {
+        let arg = self.identifier_constant(self.previous.lexeme);
+        self.emit_bytes(opcodes::OpGetGlobal, arg);
+    }
+
     fn string(&mut self) {
         let lex = self.previous.lexeme;
         let str = &lex[1..lex.len() - 1];
@@ -358,6 +367,11 @@ impl<'src> Compiler<'src> {
                 prefix: None,
                 infix: Some(Compiler::binary),
                 precedence: Precedence::Comparison,
+            },
+            TokenType::Identifier => ParseRule {
+                prefix: Some(Compiler::variable),
+                infix: None,
+                precedence: Precedence::None,
             },
             TokenType::String => ParseRule {
                 prefix: Some(Compiler::string),
