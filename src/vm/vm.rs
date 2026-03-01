@@ -1,12 +1,12 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::{Hash, Hasher},
     io::Write,
-    mem,
+    mem::{self},
 };
 
 use crate::{
-    common::{ObjString, OpCode, Value, alloc_owned_string},
+    common::{ObjString, OpCode, Value},
     compiler::Compiler,
     vm::{Interner, chunk::Chunk},
 };
@@ -162,7 +162,7 @@ impl VM {
         loop {
             // let _ = self.chunk.disassemble_instruction(self.ip);
             self.stack.print();
-            let opcode = OpCode::from(self.read_byte());
+            let opcode = self.read_opcode();
             match opcode {
                 OpCode::OpConstant => {
                     let idx = self.read_byte();
@@ -276,6 +276,10 @@ impl VM {
 
     fn read_constant(&self, idx: u8) -> Value {
         self.chunk.constants[idx as usize]
+    }
+
+    fn read_opcode(&mut self) -> OpCode {
+        unsafe { std::mem::transmute(self.read_byte()) }
     }
 
     fn runtime_error(&mut self, message: impl Into<String>) -> VMResult {

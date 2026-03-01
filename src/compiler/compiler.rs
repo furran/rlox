@@ -1,9 +1,8 @@
-use core::{fmt, panic};
 
 use crate::{
-    common::{ObjString, OpCode, Value, alloc_owned_string, opcodes},
+    common::{ObjString, Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
-    vm::{Chunk, Interner, interner, vm::VMError},
+    vm::{Chunk, Interner},
 };
 
 #[derive(PartialEq, PartialOrd)]

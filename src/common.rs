@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    borrow::{Borrow, Cow},
+    borrow::Borrow,
     hash::Hash,
     ops::{Deref, Neg},
     ptr::NonNull,
