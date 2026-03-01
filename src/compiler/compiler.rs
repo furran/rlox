@@ -1,4 +1,3 @@
-
 use crate::{
     common::{ObjString, Value, opcodes},
     compiler::scanner::{Scanner, Token, TokenType},
@@ -37,6 +36,7 @@ pub struct Compiler<'src> {
     previous: Token<'src>,
     current: Token<'src>,
     interner: &'src mut Interner,
+    can_assign: bool,
     had_error: bool,
     panic_mode: bool,
 }
@@ -49,6 +49,7 @@ impl<'src> Compiler<'src> {
             previous: Token::default(),
             current: Token::default(),
             interner,
+            can_assign: false,
             had_error: false,
             panic_mode: false,
         };
@@ -261,7 +262,13 @@ impl<'src> Compiler<'src> {
 
     fn variable(&mut self) {
         let arg = self.identifier_constant(self.previous.lexeme);
-        self.emit_bytes(opcodes::OpGetGlobal, arg);
+
+        if self.can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(opcodes::OpSetGlobal, arg);
+        } else {
+            self.emit_bytes(opcodes::OpGetGlobal, arg);
+        }
     }
 
     fn string(&mut self) {
@@ -276,7 +283,7 @@ impl<'src> Compiler<'src> {
         self.advance();
 
         let prefix_rule = Compiler::get_rule(self.previous.kind).prefix;
-
+        self.can_assign = precedence <= Precedence::Assignment;
         if let Some(prefix) = prefix_rule {
             prefix(self);
         } else {
@@ -287,6 +294,10 @@ impl<'src> Compiler<'src> {
             self.advance();
             let infix_rule = Compiler::get_rule(self.previous.kind).infix;
             infix_rule.unwrap()(self);
+        }
+
+        if self.can_assign && self.matches(TokenType::Equal) {
+            self.error_at_current("Invalid assignment target.");
         }
     }
 

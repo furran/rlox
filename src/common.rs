@@ -78,7 +78,8 @@ define_instructions! {
     OpReturn,
 
     OpDefineGlobal(index: u8),
-    OpGetGlobal(index: u8)
+    OpGetGlobal(index: u8),
+    OpSetGlobal(index: u8),
 }
 
 #[derive(Debug, Clone)]

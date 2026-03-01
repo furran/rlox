@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     hash::{Hash, Hasher},
     io::Write,
     mem::{self},
@@ -230,7 +231,19 @@ impl VM {
                         if let Some(val) = global {
                             self.stack.push(*val);
                         } else {
-                            return self.runtime_error(format!("Undefined variable '{}'", name));
+                            return self.runtime_error(format!("Undefined variable '{}'.", name));
+                        }
+                    }
+                }
+                OpCode::OpSetGlobal => {
+                    let index = self.read_byte();
+                    let obj = self.read_constant(index);
+                    if let Some(name) = obj.as_obj_string() {
+                        if self.globals.get(&ObjStringPtr(name)) == None {
+                            self.globals.remove(&ObjStringPtr(name));
+                            return self.runtime_error(format!("Undefined variable '{}'.", name));
+                        } else {
+                            self.globals.insert(ObjStringPtr(name), self.stack.peek(0));
                         }
                     }
                 }
