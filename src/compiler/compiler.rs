@@ -192,6 +192,23 @@ impl<'src> Compiler<'src> {
         self.emit_byte(byte2);
     }
 
+    fn emit_jump(&mut self, opcode: OpCode) -> usize {
+        self.emit_byte(opcode);
+        self.emit_byte(0xff);
+        self.emit_byte(0xff);
+        self.chunk.code.len() - 2
+    }
+
+    fn patch_jump(&mut self, offset: usize) {
+        let jump = self.chunk.code.len() - offset - 2;
+        if jump > u16::MAX as usize {
+            self.error_at_current("Too much code to jump over.");
+        }
+
+        self.chunk.code[offset] = ((jump >> 8) & 0xff) as u8;
+        self.chunk.code[offset + 1] = (jump & 0xff) as u8;
+    }
+
     fn emit_const(&mut self, value: Value) {
         let index = self.chunk.add_constant(value);
         self.emit_byte(OpCode::Constant);
@@ -304,6 +321,34 @@ impl<'src> Compiler<'src> {
         self.emit_byte(OpCode::Pop);
     }
 
+    fn if_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expected '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expected ')' after 'if'.");
+
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+
+        self.statement();
+
+        let else_jump = self.emit_jump(OpCode::Jump);
+
+        self.patch_jump(then_jump);
+        self.emit_byte(OpCode::Pop);
+
+        if self.matches(TokenType::Else) {
+            self.statement();
+        }
+        self.patch_jump(else_jump);
+    }
+
+    fn and(&mut self) {
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+        self.parse_precedence(Precedence::And);
+        self.patch_jump(end_jump);
+    }
+
     fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expected ';' after value.");
@@ -350,6 +395,8 @@ impl<'src> Compiler<'src> {
             self.begin_scope();
             self.block();
             self.end_scope();
+        } else if self.matches(TokenType::If) {
+            self.if_statement();
         } else {
             self.expression_statement();
         }
@@ -544,6 +591,11 @@ impl<'src> Compiler<'src> {
                 prefix: Some(Compiler::string),
                 infix: None,
                 precedence: Precedence::None,
+            },
+            TokenType::And => ParseRule {
+                prefix: None,
+                infix: Some(Compiler::and),
+                precedence: Precedence::And,
             },
             _ => ParseRule {
                 prefix: None,

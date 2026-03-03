@@ -280,6 +280,16 @@ impl VM {
                     let slot = self.read_byte() as usize;
                     self.stack.push(self.stack[slot]);
                 }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_short() as usize;
+                    if VM::is_falsey(self.stack.peek(0)) {
+                        self.ip += offset;
+                    }
+                }
+                OpCode::Jump => {
+                    let offset = self.read_short() as usize;
+                    self.ip += offset;
+                }
             }
         }
     }
@@ -289,6 +299,20 @@ impl VM {
         self.ip += 1;
 
         byte
+    }
+
+    fn read_short(&mut self) -> u16 {
+        let hi = self.read_byte() as u16;
+        let lo = self.read_byte() as u16;
+        (hi << 8) | lo
+    }
+
+    fn read_constant(&self, idx: u8) -> Value {
+        self.chunk.constants[idx as usize]
+    }
+
+    fn read_opcode(&mut self) -> OpCode {
+        unsafe { std::mem::transmute(self.read_byte()) }
     }
 
     fn binary_op<F>(&mut self, op: F) -> VMResult
@@ -318,14 +342,6 @@ impl VM {
             Value::Nil => true,
             _ => false,
         }
-    }
-
-    fn read_constant(&self, idx: u8) -> Value {
-        self.chunk.constants[idx as usize]
-    }
-
-    fn read_opcode(&mut self) -> OpCode {
-        unsafe { std::mem::transmute(self.read_byte()) }
     }
 
     fn runtime_error(&mut self, message: impl Into<String>) -> VMResult {
