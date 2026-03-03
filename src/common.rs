@@ -76,8 +76,9 @@ define_instructions! {
     SetGlobal(index: u8),
     GetGlobal(index: u8),
 
-    JumpIfFalse(offset: u16),
-    Jump(offset: u16),
+    JumpIfFalse(hi: u8, lo: u8),
+    Jump(hi: u8, lo: u8),
+    Loop(hi: u8, lo: u8),
 }
 
 impl From<OpCode> for u8 {
