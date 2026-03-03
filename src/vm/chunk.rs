@@ -81,7 +81,7 @@ impl Chunk {
                 }
                 let operand = self.code[offset + 1];
                 match opcode {
-                    OpCode::OpConstant => {
+                    OpCode::Constant => {
                         let value = self.constants[operand as usize].clone();
                         println!("{:?} {} ", opcode, value);
                     }

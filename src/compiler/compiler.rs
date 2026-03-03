@@ -10,6 +10,7 @@ use crate::{
 };
 
 #[derive(PartialEq, PartialOrd)]
+#[allow(dead_code)]
 enum Precedence {
     None,
     Assignment,
@@ -26,7 +27,6 @@ enum Precedence {
 
 type PrefixFn<'src> = fn(&mut Compiler<'src>);
 type InfixFn<'src> = PrefixFn<'src>;
-type ParseFn<'src> = InfixFn<'src>;
 
 struct ParseRule<'src> {
     prefix: Option<PrefixFn<'src>>,
@@ -178,7 +178,7 @@ impl<'src> Compiler<'src> {
             .last()
             .map_or(false, |l| l.depth > self.scope_depth)
         {
-            self.emit_byte(OpCode::OpPop);
+            self.emit_byte(OpCode::Pop);
             self.locals.pop();
         }
     }
@@ -194,12 +194,12 @@ impl<'src> Compiler<'src> {
 
     fn emit_const(&mut self, value: Value) {
         let index = self.chunk.add_constant(value);
-        self.emit_byte(OpCode::OpConstant);
+        self.emit_byte(OpCode::Constant);
         self.emit_byte(index);
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::OpReturn);
+        self.emit_byte(OpCode::Return);
     }
 
     fn expression(&mut self) {
@@ -279,7 +279,7 @@ impl<'src> Compiler<'src> {
             self.locals.last_mut().unwrap().depth = self.scope_depth;
             return;
         }
-        self.emit_bytes(OpCode::OpDefineGlobal, var);
+        self.emit_bytes(OpCode::DefineGlobal, var);
     }
 
     fn var_declaration(&mut self) {
@@ -287,7 +287,7 @@ impl<'src> Compiler<'src> {
         if self.matches(TokenType::Equal) {
             self.expression();
         } else {
-            self.emit_byte(OpCode::OpNil);
+            self.emit_byte(OpCode::Nil);
         }
 
         self.consume(
@@ -301,13 +301,13 @@ impl<'src> Compiler<'src> {
     fn expression_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expected ';' after expression.");
-        self.emit_byte(OpCode::OpPop);
+        self.emit_byte(OpCode::Pop);
     }
 
     fn print_statement(&mut self) {
         self.expression();
         self.consume(TokenType::Semicolon, "Expected ';' after value.");
-        self.emit_byte(OpCode::OpPrint);
+        self.emit_byte(OpCode::Print);
     }
 
     fn synchronize(&mut self) {
@@ -369,9 +369,9 @@ impl<'src> Compiler<'src> {
 
     fn literal(&mut self) {
         match self.previous.kind {
-            TokenType::False => self.emit_byte(OpCode::OpFalse),
-            TokenType::True => self.emit_byte(OpCode::OpTrue),
-            TokenType::Nil => self.emit_byte(OpCode::OpNil),
+            TokenType::False => self.emit_byte(OpCode::False),
+            TokenType::True => self.emit_byte(OpCode::True),
+            TokenType::Nil => self.emit_byte(OpCode::Nil),
             _ => unreachable!(),
         }
     }
@@ -382,8 +382,8 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(Precedence::Assignment);
 
         match kind {
-            TokenType::Minus => self.emit_byte(OpCode::OpNegate),
-            TokenType::Bang => self.emit_byte(OpCode::OpNot),
+            TokenType::Minus => self.emit_byte(OpCode::Negate),
+            TokenType::Bang => self.emit_byte(OpCode::Not),
             _ => unreachable!(),
         }
     }
@@ -394,16 +394,16 @@ impl<'src> Compiler<'src> {
         self.parse_precedence(rule.precedence);
 
         match kind {
-            TokenType::Plus => self.emit_byte(OpCode::OpAdd),
-            TokenType::Minus => self.emit_byte(OpCode::OpSubtract),
-            TokenType::Star => self.emit_byte(OpCode::OpMultiply),
-            TokenType::Slash => self.emit_byte(OpCode::OpDivide),
-            TokenType::BangEqual => self.emit_bytes(OpCode::OpEqual, OpCode::OpNot),
-            TokenType::EqualEqual => self.emit_byte(OpCode::OpEqual),
-            TokenType::Greater => self.emit_byte(OpCode::OpGreater),
-            TokenType::GreaterEqual => self.emit_bytes(OpCode::OpLess, OpCode::OpNot),
-            TokenType::Less => self.emit_byte(OpCode::OpLess),
-            TokenType::LessEqual => self.emit_bytes(OpCode::OpGreater, OpCode::OpNot),
+            TokenType::Plus => self.emit_byte(OpCode::Add),
+            TokenType::Minus => self.emit_byte(OpCode::Subtract),
+            TokenType::Star => self.emit_byte(OpCode::Multiply),
+            TokenType::Slash => self.emit_byte(OpCode::Divide),
+            TokenType::BangEqual => self.emit_bytes(OpCode::Equal, OpCode::Not),
+            TokenType::EqualEqual => self.emit_byte(OpCode::Equal),
+            TokenType::Greater => self.emit_byte(OpCode::Greater),
+            TokenType::GreaterEqual => self.emit_bytes(OpCode::Less, OpCode::Not),
+            TokenType::Less => self.emit_byte(OpCode::Less),
+            TokenType::LessEqual => self.emit_bytes(OpCode::Greater, OpCode::Not),
             _ => unreachable!(),
         }
     }
@@ -412,13 +412,9 @@ impl<'src> Compiler<'src> {
         let name = self.previous.lexeme;
 
         let (get_op, set_op, arg) = if let Some(local_slot) = self.resolve_local(name) {
-            (OpCode::OpGetLocal, OpCode::OpSetLocal, local_slot)
+            (OpCode::GetLocal, OpCode::SetLocal, local_slot)
         } else {
-            (
-                OpCode::OpGetGlobal,
-                OpCode::OpSetGlobal,
-                self.global_slot(name),
-            )
+            (OpCode::GetGlobal, OpCode::SetGlobal, self.global_slot(name))
         };
 
         if self.can_assign && self.matches(TokenType::Equal) {

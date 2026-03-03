@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{Read, Write},
+    io::Write,
     mem::{self},
     ops::{Deref, DerefMut},
 };
@@ -199,12 +199,12 @@ impl VM {
             self.stack.print();
             let opcode = self.read_opcode();
             match opcode {
-                OpCode::OpConstant => {
+                OpCode::Constant => {
                     let idx = self.read_byte();
                     let constant = self.read_constant(idx);
                     self.stack.push(constant);
                 }
-                OpCode::OpNegate => {
+                OpCode::Negate => {
                     let value = self.stack.pop();
                     if let Value::Number(val) = value {
                         self.stack.push(Value::Number(-val));
@@ -212,7 +212,7 @@ impl VM {
                         return self.runtime_error("Operand must be a number.");
                     }
                 }
-                OpCode::OpAdd => {
+                OpCode::Add => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
                     let result = match (a, b) {
@@ -225,31 +225,31 @@ impl VM {
                     };
                     self.stack.push(result);
                 }
-                OpCode::OpSubtract => self.binary_op(|a, b| Value::Number(a - b))?,
-                OpCode::OpMultiply => self.binary_op(|a, b| Value::Number(a * b))?,
-                OpCode::OpDivide => self.binary_op(|a, b| Value::Number(a / b))?,
-                OpCode::OpFalse => self.stack.push(Value::Bool(false)),
-                OpCode::OpTrue => self.stack.push(Value::Bool(true)),
-                OpCode::OpNil => self.stack.push(Value::Nil),
-                OpCode::OpNot => {
+                OpCode::Subtract => self.binary_op(|a, b| Value::Number(a - b))?,
+                OpCode::Multiply => self.binary_op(|a, b| Value::Number(a * b))?,
+                OpCode::Divide => self.binary_op(|a, b| Value::Number(a / b))?,
+                OpCode::False => self.stack.push(Value::Bool(false)),
+                OpCode::True => self.stack.push(Value::Bool(true)),
+                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::Not => {
                     let value = self.stack.pop();
                     self.stack.push(Value::Bool(VM::is_falsey(value)));
                 }
-                OpCode::OpEqual => {
+                OpCode::Equal => {
                     let b = self.stack.pop();
                     let a = self.stack.pop();
                     self.stack.push(Value::Bool(a == b));
                 }
-                OpCode::OpGreater => self.binary_op(|a, b| Value::Bool(a > b))?,
-                OpCode::OpLess => self.binary_op(|a, b| Value::Bool(a < b))?,
-                OpCode::OpPrint => println!("printed: {}", self.stack.pop()),
-                OpCode::OpPop => {
+                OpCode::Greater => self.binary_op(|a, b| Value::Bool(a > b))?,
+                OpCode::Less => self.binary_op(|a, b| Value::Bool(a < b))?,
+                OpCode::Print => println!("printed: {}", self.stack.pop()),
+                OpCode::Pop => {
                     self.stack.pop();
                 }
-                OpCode::OpReturn => {
+                OpCode::Return => {
                     return Ok(());
                 }
-                OpCode::OpDefineGlobal => {
+                OpCode::DefineGlobal => {
                     let slot = self.read_byte() as usize;
                     let value = self.stack.pop();
                     if slot >= self.globals.len() {
@@ -257,14 +257,14 @@ impl VM {
                     }
                     self.globals[slot] = value;
                 }
-                OpCode::OpSetGlobal => {
+                OpCode::SetGlobal => {
                     let slot = self.read_byte() as usize;
                     if slot >= self.globals.len() {
                         return self.runtime_error("Undefined variable.");
                     }
                     self.globals[slot] = self.stack.peek(0);
                 }
-                OpCode::OpGetGlobal => {
+                OpCode::GetGlobal => {
                     let slot = self.read_byte() as usize;
                     if let Some(value) = self.globals.get(slot) {
                         self.stack.push(*value)
@@ -272,11 +272,11 @@ impl VM {
                         return self.runtime_error("Undefined variable.");
                     }
                 }
-                OpCode::OpSetLocal => {
+                OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
                     self.stack[slot] = self.stack.peek(0);
                 }
-                OpCode::OpGetLocal => {
+                OpCode::GetLocal => {
                     let slot = self.read_byte() as usize;
                     self.stack.push(self.stack[slot]);
                 }
