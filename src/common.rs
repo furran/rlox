@@ -12,18 +12,11 @@ macro_rules! define_instructions {
         ), * $(,)?
     ) => {
 
-        #[allow(non_upper_case_globals)]
-        pub mod opcodes {
-            $(
-                pub const $variant: u8 = super::OpCode::$variant as u8;
-            )*
-        }
-
         #[derive(Debug)]
         #[repr(u8)]
         pub enum OpCode {
             $(
-                $variant $(= $opcode)?
+                $variant
             ),*
         }
 
@@ -76,9 +69,18 @@ define_instructions! {
     OpPop,
     OpReturn,
 
+    OpSetLocal(index: u8),
+    OpGetLocal(index: u8),
+
     OpDefineGlobal(index: u8),
-    OpGetGlobal(index: u8),
     OpSetGlobal(index: u8),
+    OpGetGlobal(index: u8),
+}
+
+impl From<OpCode> for u8 {
+    fn from(value: OpCode) -> Self {
+        value as u8
+    }
 }
 
 #[derive(Debug, Clone)]

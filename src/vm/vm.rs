@@ -1,19 +1,20 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::{Read, Write},
     mem::{self},
     ops::{Deref, DerefMut},
 };
 
 use crate::{
     common::{ObjString, ObjStringPtr, OpCode, Value},
-    compiler::Compiler,
+    compiler::{Compiler, compiler::CompileError},
     vm::{Interner, chunk::Chunk},
 };
 
 #[derive(Debug)]
 pub enum VMError {
     RuntimeError(String),
+    CompileError(Vec<CompileError>),
 }
 
 pub type VMResult = Result<(), VMError>;
@@ -22,6 +23,20 @@ pub type VMResult = Result<(), VMError>;
 struct Stack<T, const N: usize> {
     data: [T; N],
     top: usize,
+}
+
+impl<T, const N: usize> Deref for Stack<T, N> {
+    type Target = [T; N];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T, const N: usize> DerefMut for Stack<T, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
 }
 
 #[allow(dead_code)]
@@ -72,10 +87,7 @@ where
         N
     }
 
-    fn print(&self)
-    where
-        T: std::fmt::Debug,
-    {
+    fn print(&self) {
         print!("Stack [");
         for i in 0..self.top {
             let val = &self.data[i];
@@ -133,36 +145,50 @@ impl VM {
         let mut vm = VM::new();
 
         loop {
-            print!("> ");
-            stdout.flush()?;
+            print!(">>> ");
+            stdout.flush().unwrap();
 
-            let mut line = String::new();
+            let mut buffer = String::new();
+            stdin.read_line(&mut buffer).unwrap();
 
-            match stdin.read_line(&mut line) {
-                Ok(0) => {
-                    println!();
-                    return Ok(());
-                }
-                Ok(_) => {
-                    let line = line.trim_end();
-                    if let Err(e) = vm.interpret(line) {
-                        eprintln!("Error: {:?}", e);
+            while !VM::is_complete(&buffer) {
+                print!("... ");
+                stdout.flush().unwrap();
+                stdin.read_line(&mut buffer).unwrap();
+            }
+
+            if let Err(e) = vm.interpret(&buffer) {
+                match e {
+                    VMError::CompileError(errors) => {
+                        for error in errors {
+                            eprintln!("[CompileError] {}", error);
+                        }
                     }
-                }
-                Err(e) => {
-                    eprintln!("Error reading input: {}", e);
-                    return Err(e);
+                    VMError::RuntimeError(msg) => eprintln!("[RuntimeError] {}", msg),
                 }
             }
-            println!("{:?}", vm.interner);
-            println!("{:?}", vm.globals);
         }
+    }
+
+    pub fn is_complete(source: &str) -> bool {
+        let mut depth = 0;
+        let mut in_string = false;
+
+        for c in source.chars() {
+            match c {
+                '"' => in_string = !in_string,
+                '{' if !in_string => depth += 1,
+                '}' if !in_string => depth -= 1,
+                _ => {}
+            }
+        }
+        depth == 0
     }
 
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
-        self.chunk = Compiler::compile(source, &mut self.interner, &mut self.global_indices);
+        self.chunk = Compiler::compile(source, &mut self.interner, &mut self.global_indices)?;
         self.ip = 0;
 
         self.run()
@@ -170,7 +196,6 @@ impl VM {
 
     fn run(&mut self) -> VMResult {
         loop {
-            // let _ = self.chunk.disassemble_instruction(self.ip);
             self.stack.print();
             let opcode = self.read_opcode();
             match opcode {
@@ -178,7 +203,6 @@ impl VM {
                     let idx = self.read_byte();
                     let constant = self.read_constant(idx);
                     self.stack.push(constant);
-                    println!("{:?}", constant);
                 }
                 OpCode::OpNegate => {
                     let value = self.stack.pop();
@@ -218,7 +242,7 @@ impl VM {
                 }
                 OpCode::OpGreater => self.binary_op(|a, b| Value::Bool(a > b))?,
                 OpCode::OpLess => self.binary_op(|a, b| Value::Bool(a < b))?,
-                OpCode::OpPrint => println!("{}", self.stack.pop()),
+                OpCode::OpPrint => println!("printed: {}", self.stack.pop()),
                 OpCode::OpPop => {
                     self.stack.pop();
                 }
@@ -233,6 +257,13 @@ impl VM {
                     }
                     self.globals[slot] = value;
                 }
+                OpCode::OpSetGlobal => {
+                    let slot = self.read_byte() as usize;
+                    if slot >= self.globals.len() {
+                        return self.runtime_error("Undefined variable.");
+                    }
+                    self.globals[slot] = self.stack.peek(0);
+                }
                 OpCode::OpGetGlobal => {
                     let slot = self.read_byte() as usize;
                     if let Some(value) = self.globals.get(slot) {
@@ -241,12 +272,13 @@ impl VM {
                         return self.runtime_error("Undefined variable.");
                     }
                 }
-                OpCode::OpSetGlobal => {
+                OpCode::OpSetLocal => {
                     let slot = self.read_byte() as usize;
-                    if slot >= self.globals.len() {
-                        return self.runtime_error("Undefined variable.");
-                    }
-                    self.globals[slot] = self.stack.peek(0);
+                    self.stack[slot] = self.stack.peek(0);
+                }
+                OpCode::OpGetLocal => {
+                    let slot = self.read_byte() as usize;
+                    self.stack.push(self.stack[slot]);
                 }
             }
         }

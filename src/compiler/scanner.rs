@@ -47,7 +47,7 @@ pub enum TokenType {
     Dummy,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Token<'src> {
     pub lexeme: &'src str,
     pub line: usize,
@@ -140,8 +140,6 @@ impl<'src> Scanner<'src> {
             b'"' => self.string(),
             _ => TokenType::Error,
         };
-
-        println!("token_type: {:?}", token_type);
 
         self.make_token(token_type)
     }
