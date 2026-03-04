@@ -11,6 +11,7 @@ pub enum TokenType {
     Dot,
     Minus,
     Plus,
+    Colon,
     Semicolon,
     Slash,
     Star,
@@ -33,6 +34,9 @@ pub enum TokenType {
     False,
     For,
     Fun,
+    Switch,
+    Case,
+    Default,
     If,
     Nil,
     Or,
@@ -100,6 +104,7 @@ impl<'src> Scanner<'src> {
             b']' => TokenType::RightBrace,
             b'{' => TokenType::LeftBrace,
             b'}' => TokenType::RightBrace,
+            b':' => TokenType::Colon,
             b';' => TokenType::Semicolon,
             b',' => TokenType::Comma,
             b'.' => TokenType::Dot,
@@ -188,38 +193,34 @@ impl<'src> Scanner<'src> {
 
         match self.bytes[self.start] {
             b'a' => self.check_keyword(1, b"nd", TokenType::And),
-            b'c' => self.check_keyword(1, b"lass", TokenType::Class),
+            b'c' => match self.bytes.get(self.start + 1) {
+                Some(b'a') => self.check_keyword(2, b"se", TokenType::Case),
+                Some(b'l') => self.check_keyword(2, b"ass", TokenType::Class),
+                _ => TokenType::Identifier,
+            },
+            b'd' => self.check_keyword(1, b"efault", TokenType::Default),
             b'e' => self.check_keyword(1, b"lse", TokenType::Else),
-            b'f' => {
-                if self.current - self.start > 1 {
-                    match self.bytes[self.start + 1] {
-                        b'a' => self.check_keyword(2, b"lse", TokenType::False),
-                        b'o' => self.check_keyword(2, b"r", TokenType::For),
-                        b'u' => self.check_keyword(2, b"n", TokenType::Fun),
-                        _ => TokenType::Identifier,
-                    }
-                } else {
-                    TokenType::Identifier
-                }
-            }
-
+            b'f' => match self.bytes.get(self.start + 1) {
+                Some(b'a') => self.check_keyword(2, b"lse", TokenType::False),
+                Some(b'o') => self.check_keyword(2, b"r", TokenType::For),
+                Some(b'u') => self.check_keyword(2, b"n", TokenType::Fun),
+                _ => TokenType::Identifier,
+            },
             b'i' => self.check_keyword(1, b"f", TokenType::If),
             b'n' => self.check_keyword(1, b"il", TokenType::Nil),
             b'o' => self.check_keyword(1, b"r", TokenType::Or),
             b'p' => self.check_keyword(1, b"rint", TokenType::Print),
             b'r' => self.check_keyword(1, b"eturn", TokenType::Return),
-            b's' => self.check_keyword(1, b"uper", TokenType::Super),
-            b't' => {
-                if self.current - self.start > 1 {
-                    match self.bytes[self.start + 1] {
-                        b'h' => self.check_keyword(2, b"is", TokenType::This),
-                        b'r' => self.check_keyword(2, b"ue", TokenType::True),
-                        _ => TokenType::Identifier,
-                    }
-                } else {
-                    TokenType::Identifier
-                }
-            }
+            b's' => match self.bytes.get(self.start + 1) {
+                Some(b'u') => self.check_keyword(2, b"per", TokenType::Super),
+                Some(b'w') => self.check_keyword(2, b"itch", TokenType::Switch),
+                _ => TokenType::Identifier,
+            },
+            b't' => match self.bytes.get(self.start + 1) {
+                Some(b'h') => self.check_keyword(2, b"is", TokenType::This),
+                Some(b'r') => self.check_keyword(2, b"ue", TokenType::True),
+                _ => TokenType::Identifier,
+            },
             b'v' => self.check_keyword(1, b"ar", TokenType::Var),
             b'w' => self.check_keyword(1, b"hile", TokenType::While),
             _ => TokenType::Identifier,

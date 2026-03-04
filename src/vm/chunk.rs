@@ -59,7 +59,7 @@ impl Chunk {
         }
 
         let line = self.get_line(offset);
-        print!("{:04} ", offset);
+        print!("{:04x} ", offset);
 
         if offset > 0 && line == self.get_line(offset - 1) {
             print!("   | ");

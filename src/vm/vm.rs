@@ -294,6 +294,11 @@ impl VM {
                     let offset = self.read_short() as usize;
                     self.ip -= offset;
                 }
+                OpCode::SwitchEq => {
+                    let case = self.stack.pop();
+                    let switch = self.stack.peek(0);
+                    self.stack.push(Value::Bool(switch == case));
+                }
             }
         }
     }

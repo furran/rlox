@@ -333,6 +333,66 @@ impl<'src> Compiler<'src> {
         self.emit_byte(OpCode::Pop);
     }
 
+    fn switch_statement(&mut self) {
+        self.consume(TokenType::LeftParen, "Expected '(' after switch.");
+        self.expression();
+        self.consume(TokenType::RightParen, "Expected ')' after expression.");
+        self.consume(TokenType::LeftBrace, "Expected '{' after switch statement.");
+
+        let mut exit_jumps = Vec::with_capacity(u8::MAX as usize);
+
+        while !self.check(TokenType::RightBrace) {
+            if self.matches(TokenType::Case) {
+                exit_jumps.push(self.switch_case());
+            } else if self.matches(TokenType::Default) {
+                exit_jumps.push(self.switch_default());
+            }
+        }
+
+        exit_jumps
+            .iter()
+            .for_each(|offset| self.patch_jump(*offset));
+
+        self.emit_byte(OpCode::Pop);
+        self.consume(TokenType::RightBrace, "Expected '}' after switch cases.");
+    }
+
+    fn switch_case(&mut self) -> usize {
+        self.expression();
+        self.consume(TokenType::Colon, "Expected ':' after case.");
+        self.emit_byte(OpCode::SwitchEq);
+
+        let next_case = self.emit_jump(OpCode::JumpIfFalse);
+        self.emit_byte(OpCode::Pop);
+
+        while !self.check(TokenType::Case)
+            && !self.check(TokenType::Default)
+            && !self.check(TokenType::RightBrace)
+            && !self.check(TokenType::EOF)
+        {
+            self.statement();
+        }
+
+        let exit_jump = self.emit_jump(OpCode::Jump);
+        self.patch_jump(next_case);
+        self.emit_byte(OpCode::Pop);
+
+        exit_jump
+    }
+
+    fn switch_default(&mut self) -> usize {
+        self.consume(TokenType::Colon, "Expected ':' after default case.");
+
+        while !self.check(TokenType::Case)
+            && !self.check(TokenType::Default)
+            && !self.check(TokenType::RightBrace)
+            && !self.check(TokenType::EOF)
+        {
+            self.statement();
+        }
+        self.emit_jump(OpCode::Jump)
+    }
+
     fn if_statement(&mut self) {
         self.consume(TokenType::LeftParen, "Expected '(' after 'if'.");
         self.expression();
@@ -479,6 +539,8 @@ impl<'src> Compiler<'src> {
             self.end_scope();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::Switch) {
+            self.switch_statement();
         } else if self.matches(TokenType::While) {
             self.while_statement();
         } else if self.matches(TokenType::For) {

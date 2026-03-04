@@ -79,6 +79,8 @@ define_instructions! {
     JumpIfFalse(hi: u8, lo: u8),
     Jump(hi: u8, lo: u8),
     Loop(hi: u8, lo: u8),
+
+    SwitchEq,
 }
 
 impl From<OpCode> for u8 {
