@@ -6,9 +6,10 @@ use std::{
 };
 
 use crate::{
-    common::{ObjString, ObjStringPtr, OpCode, Value},
+    common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    vm::{Interner, chunk::Chunk},
+    object::{ObjString, ObjStringPtr, Object},
+    vm::{chunk::Chunk, heap::Heap},
 };
 
 #[derive(Debug)]
@@ -101,7 +102,7 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct GlobalIndices(pub HashMap<ObjStringPtr, u8>);
+pub struct GlobalIndices(HashMap<ObjStringPtr, u8>);
 
 impl Deref for GlobalIndices {
     type Target = HashMap<ObjStringPtr, u8>;
@@ -122,7 +123,7 @@ pub struct VM {
     chunk: Chunk,
     ip: usize,
     stack: Stack<Value, 256>,
-    interner: Interner,
+    heap: Heap,
     globals: Vec<Value>,
     global_indices: GlobalIndices,
 }
@@ -133,7 +134,7 @@ impl VM {
             chunk: Chunk::new(),
             ip: 0,
             stack: Stack::new(),
-            interner: Interner::new(),
+            heap: Heap::new(),
             globals: Vec::new(),
             global_indices: GlobalIndices::default(),
         }
@@ -167,10 +168,13 @@ impl VM {
                     VMError::RuntimeError(msg) => eprintln!("[RuntimeError] {}", msg),
                 }
             }
+
+            println!("{:?}", vm.heap);
+            println!("Globals vector: {:?}", vm.globals);
         }
     }
 
-    pub fn is_complete(source: &str) -> bool {
+    fn is_complete(source: &str) -> bool {
         let mut depth = 0;
         let mut in_string = false;
 
@@ -188,7 +192,7 @@ impl VM {
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
-        self.chunk = Compiler::compile(source, &mut self.interner, &mut self.global_indices)?;
+        self.chunk = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
         self.ip = 0;
 
         self.run()
@@ -217,7 +221,13 @@ impl VM {
                     let a = self.stack.pop();
                     let result = match (a, b) {
                         (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-                        (Value::String(a), Value::String(b)) => self.concatenate(a, b),
+                        (Value::Obj(a), Value::Obj(b)) => match (&*a, &*b) {
+                            (Object::String(a), Object::String(b)) => self.concatenate(a, b),
+                            _ => {
+                                return self
+                                    .runtime_error("Operands must be two numbers or two strings.");
+                            }
+                        },
                         _ => {
                             return self
                                 .runtime_error("Operands must be two numbers or two strings.");
@@ -341,8 +351,8 @@ impl VM {
 
     fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {
         let conc = unsafe { format!("{}{}", (*a).str, (*b).str) };
-        let str = self.intern(&conc);
-        Value::String(str)
+        let str = self.heap.alloc_string(&conc);
+        Value::Obj(str)
     }
 
     fn is_falsey(v: Value) -> bool {
@@ -365,9 +375,5 @@ impl VM {
 
     fn reset_stack(&mut self) {
         self.stack.top = 0;
-    }
-
-    pub fn intern(&mut self, e: &str) -> *const ObjString {
-        self.interner.intern(e)
     }
 }

@@ -1,7 +1,8 @@
 use crate::vm::VM;
 
-pub mod common;
+mod common;
 pub mod compiler;
+mod object;
 pub mod vm;
 
 fn main() {

@@ -1,9 +1,7 @@
 use core::fmt;
-use std::{
-    borrow::Borrow,
-    hash::{Hash, Hasher},
-    ops::{Deref, Neg},
-};
+use std::ops::Neg;
+
+use crate::object::{ObjRef, Object};
 
 macro_rules! define_instructions {
     (
@@ -89,70 +87,13 @@ impl From<OpCode> for u8 {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ObjString {
-    pub str: String,
-}
-
-impl Deref for ObjString {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.str
-    }
-}
-
-impl fmt::Display for ObjString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.str.fmt(f)
-    }
-}
-
-impl PartialEq for ObjString {
-    fn eq(&self, other: &Self) -> bool {
-        self.str == other.str
-    }
-}
-
-impl Eq for ObjString {}
-
-impl Hash for ObjString {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.str.hash(state);
-    }
-}
-
-impl Borrow<str> for Box<ObjString> {
-    fn borrow(&self) -> &str {
-        &self.str
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ObjStringPtr(pub *const ObjString);
-
-impl Hash for ObjStringPtr {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
 #[derive(Debug, Copy, Clone, Default)]
 pub enum Value {
     #[default]
     Nil,
     Number(f64),
     Bool(bool),
-    String(*const ObjString),
-}
-
-impl Value {
-    pub fn as_obj_string(&self) -> Option<&ObjString> {
-        if let Value::String(ptr) = self {
-            Some(unsafe { &**ptr })
-        } else {
-            None
-        }
-    }
+    Obj(ObjRef),
 }
 
 impl PartialEq for Value {
@@ -161,7 +102,7 @@ impl PartialEq for Value {
             (Value::Nil, Value::Nil) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Obj(a), Value::Obj(b)) => a == b,
             _ => false,
         }
     }
@@ -173,7 +114,10 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "Nil"),
             Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
-            Value::String(obj) => write!(f, "{}", unsafe { &(**obj).str }),
+            Value::Obj(obj) => match &**obj {
+                Object::String(obj_string) => write!(f, "{}", &(**obj_string)),
+                _ => todo!(),
+            },
         }
     }
 }

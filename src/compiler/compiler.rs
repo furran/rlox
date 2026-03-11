@@ -1,10 +1,11 @@
 use std::fmt::{Display, Formatter};
 
 use crate::{
-    common::{ObjString, ObjStringPtr, OpCode, Value},
+    common::{OpCode, Value},
     compiler::scanner::{Scanner, Token, TokenType},
+    object::ObjStringPtr,
     vm::{
-        Chunk, Interner,
+        Chunk, Heap,
         vm::{GlobalIndices, VMError},
     },
 };
@@ -83,7 +84,7 @@ pub struct Compiler<'src> {
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
-    interner: &'src mut Interner,
+    heap: &'src mut Heap,
     global_indices: &'src mut GlobalIndices,
     errors: Vec<CompileError>,
     locals: Vec<Local<'src>>,
@@ -96,7 +97,7 @@ pub struct Compiler<'src> {
 impl<'src> Compiler<'src> {
     pub fn compile(
         source: &'src str,
-        interner: &mut Interner,
+        heap: &mut Heap,
         global_indices: &mut GlobalIndices,
     ) -> Result<Chunk, VMError> {
         let mut compiler = Compiler {
@@ -104,7 +105,7 @@ impl<'src> Compiler<'src> {
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
-            interner,
+            heap: heap,
             global_indices,
             errors: Vec::new(),
             locals: Vec::with_capacity(u8::MAX as usize),
@@ -256,7 +257,8 @@ impl<'src> Compiler<'src> {
     }
 
     fn global_slot(&mut self, name: &str) -> u8 {
-        let obj_string = ObjStringPtr(self.intern(name));
+        let obj_ref = self.heap.alloc_string(name);
+        let obj_string = ObjStringPtr::from(obj_ref);
         if let Some(slot) = self.global_indices.get(&obj_string) {
             return *slot;
         }
@@ -623,9 +625,8 @@ impl<'src> Compiler<'src> {
     fn string(&mut self) {
         let lex = self.previous.lexeme;
         let str = &lex[1..lex.len() - 1];
-        // let obj = alloc_owned_string(str.to_string());
-        let obj = self.interner.intern(str);
-        self.emit_const(Value::String(obj));
+        let obj = self.heap.alloc_string(str);
+        self.emit_const(Value::Obj(obj));
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
@@ -756,9 +757,5 @@ impl<'src> Compiler<'src> {
                 precedence: Precedence::None,
             },
         }
-    }
-
-    pub fn intern(&mut self, e: &str) -> *const ObjString {
-        self.interner.intern(e)
     }
 }

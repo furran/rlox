@@ -1,7 +1,7 @@
 pub mod chunk;
-pub mod interner;
+mod heap;
 pub mod vm;
 
 pub use chunk::Chunk;
-pub use interner::Interner;
+pub use heap::Heap;
 pub use vm::VM;
