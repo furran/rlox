@@ -96,6 +96,16 @@ pub enum Value {
     Obj(ObjRef),
 }
 
+impl Value {
+    pub fn is_falsey(&self) -> bool {
+        match self {
+            Value::Bool(x) => !x,
+            Value::Nil => true,
+            _ => false,
+        }
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {

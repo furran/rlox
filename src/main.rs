@@ -1,10 +1,5 @@
-use crate::vm::VM;
-
-mod common;
-pub mod compiler;
-mod object;
-pub mod vm;
+use rlox::vm::vm::repl;
 
 fn main() {
-    let _ = VM::repl();
+    let _ = repl();
 }

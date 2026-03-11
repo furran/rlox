@@ -119,17 +119,18 @@ impl DerefMut for GlobalIndices {
 }
 
 #[derive(Debug)]
-pub struct VM {
+pub struct VM<W: Write> {
     chunk: Chunk,
     ip: usize,
     stack: Stack<Value, 256>,
     heap: Heap,
     globals: Vec<Value>,
     global_indices: GlobalIndices,
+    output: W,
 }
 
-impl VM {
-    fn new() -> Self {
+impl<W: Write> VM<W> {
+    pub fn new(output: W) -> Self {
         Self {
             chunk: Chunk::new(),
             ip: 0,
@@ -137,56 +138,8 @@ impl VM {
             heap: Heap::new(),
             globals: Vec::new(),
             global_indices: GlobalIndices::default(),
+            output,
         }
-    }
-
-    pub fn repl() -> std::io::Result<()> {
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        let mut vm = VM::new();
-
-        loop {
-            print!(">>> ");
-            stdout.flush().unwrap();
-
-            let mut buffer = String::new();
-            stdin.read_line(&mut buffer).unwrap();
-
-            while !VM::is_complete(&buffer) {
-                print!("... ");
-                stdout.flush().unwrap();
-                stdin.read_line(&mut buffer).unwrap();
-            }
-
-            if let Err(e) = vm.interpret(&buffer) {
-                match e {
-                    VMError::CompileError(errors) => {
-                        for error in errors {
-                            eprintln!("[CompileError] {}", error);
-                        }
-                    }
-                    VMError::RuntimeError(msg) => eprintln!("[RuntimeError] {}", msg),
-                }
-            }
-
-            println!("{:?}", vm.heap);
-            println!("Globals vector: {:?}", vm.globals);
-        }
-    }
-
-    fn is_complete(source: &str) -> bool {
-        let mut depth = 0;
-        let mut in_string = false;
-
-        for c in source.chars() {
-            match c {
-                '"' => in_string = !in_string,
-                '{' if !in_string => depth += 1,
-                '}' if !in_string => depth -= 1,
-                _ => {}
-            }
-        }
-        depth == 0
     }
 
     pub fn run_file(_source: &String) {}
@@ -243,7 +196,7 @@ impl VM {
                 OpCode::Nil => self.stack.push(Value::Nil),
                 OpCode::Not => {
                     let value = self.stack.pop();
-                    self.stack.push(Value::Bool(VM::is_falsey(value)));
+                    self.stack.push(Value::Bool(value.is_falsey()));
                 }
                 OpCode::Equal => {
                     let b = self.stack.pop();
@@ -252,7 +205,8 @@ impl VM {
                 }
                 OpCode::Greater => self.binary_op(|a, b| Value::Bool(a > b))?,
                 OpCode::Less => self.binary_op(|a, b| Value::Bool(a < b))?,
-                OpCode::Print => println!("printed: {}", self.stack.pop()),
+                OpCode::Print => writeln!(self.output, "{}", self.stack.pop())
+                    .map_err(|e| VMError::RuntimeError(e.to_string()))?,
                 OpCode::Pop => {
                     self.stack.pop();
                 }
@@ -292,7 +246,7 @@ impl VM {
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short() as usize;
-                    if VM::is_falsey(self.stack.peek(0)) {
+                    if self.stack.peek(0).is_falsey() {
                         self.ip += offset;
                     }
                 }
@@ -355,25 +309,63 @@ impl VM {
         Value::Obj(str)
     }
 
-    fn is_falsey(v: Value) -> bool {
-        match v {
-            Value::Bool(x) => !x,
-            Value::Nil => true,
-            _ => false,
-        }
-    }
-
     fn runtime_error(&mut self, message: impl Into<String>) -> VMResult {
         let message = message.into();
-        eprintln!("{}", message);
         let ip = self.ip - 1;
         let line = self.chunk.get_line(ip);
-        eprintln!("[line {line}] in script");
         self.reset_stack();
-        Err(VMError::RuntimeError(message))
+        Err(VMError::RuntimeError(format!("[line {line}] {message}")))
     }
 
     fn reset_stack(&mut self) {
         self.stack.top = 0;
     }
+}
+
+pub fn repl() -> std::io::Result<()> {
+    let stdin = std::io::stdin();
+    let mut vm = VM::new(std::io::stdout());
+
+    loop {
+        print!(">>> ");
+        vm.output.flush().unwrap();
+
+        let mut buffer = String::new();
+        stdin.read_line(&mut buffer).unwrap();
+
+        while !is_complete(&buffer) {
+            print!("... ");
+            vm.output.flush().unwrap();
+            stdin.read_line(&mut buffer).unwrap();
+        }
+
+        if let Err(e) = vm.interpret(&buffer) {
+            match e {
+                VMError::CompileError(errors) => {
+                    for error in errors {
+                        eprintln!("[CompileError] {}", error);
+                    }
+                }
+                VMError::RuntimeError(msg) => eprintln!("[RuntimeError] {}", msg),
+            }
+        }
+
+        println!("{:?}", vm.heap);
+        println!("Globals vector: {:?}", vm.globals);
+    }
+}
+
+fn is_complete(source: &str) -> bool {
+    let mut depth = 0;
+    let mut in_string = false;
+
+    for c in source.chars() {
+        match c {
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => depth -= 1,
+            _ => {}
+        }
+    }
+    depth == 0
 }
