@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{
     borrow::Borrow,
+    fmt::Display,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -96,9 +97,38 @@ impl ObjStringPtr {
 
 #[derive(Debug)]
 pub struct ObjFunction {
-    chunk: Chunk,
-    name: NonNull<ObjString>,
-    arity: u32,
+    pub chunk: Chunk,
+    pub name: Option<NonNull<ObjString>>,
+    pub arity: u32,
+}
+
+impl Default for ObjFunction {
+    fn default() -> Self {
+        Self {
+            chunk: Chunk::new(),
+            name: Default::default(),
+            arity: Default::default(),
+        }
+    }
+}
+
+impl ObjFunction {
+    pub fn new(name: Option<NonNull<ObjString>>) -> ObjFunction {
+        Self {
+            chunk: Chunk::new(),
+            name,
+            arity: 0,
+        }
+    }
+}
+
+impl fmt::Display for ObjFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name {
+            Some(name) => write!(f, "<fn {}>", unsafe { name.as_ref() }),
+            None => write!(f, "<script>"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -107,8 +137,26 @@ pub enum Object {
     Function(ObjFunction),
 }
 
+impl Display for Object {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            Object::String(obj_string) => write!(f, "{}", obj_string),
+            Object::Function(obj_function) => write!(f, "{}", obj_function),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct ObjRef(NonNull<Object>);
+
+impl ObjRef {
+    pub fn as_function(&self) -> Option<NonNull<ObjFunction>> {
+        match unsafe { self.0.as_ref() } {
+            Object::Function(f) => Some(NonNull::from(f)),
+            _ => None,
+        }
+    }
+}
 
 impl Deref for ObjRef {
     type Target = Object;

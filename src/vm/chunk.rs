@@ -42,22 +42,17 @@ impl Chunk {
             .unwrap_or_default()
     }
 
-    pub fn disassemble(&self, name: &str) -> fmt::Result {
+    pub fn disassemble(&self, name: &str) {
         println!("== {} start ==", name);
         let mut offset = 0;
 
         while offset < self.code.len() {
-            offset = self.disassemble_instruction(offset)?;
+            offset = self.disassemble_instruction(offset);
         }
         println!("==  {} end  ==", name);
-        Ok(())
     }
 
-    pub fn disassemble_instruction(&self, offset: usize) -> Result<usize, fmt::Error> {
-        if offset >= self.code.len() {
-            return Err(fmt::Error);
-        }
-
+    pub fn disassemble_instruction(&self, offset: usize) -> usize {
         let line = self.get_line(offset);
         print!("{:04x} ", offset);
 
@@ -73,7 +68,7 @@ impl Chunk {
         match operand_count {
             0 => {
                 println!("{:?}", opcode);
-                Ok(offset + 1)
+                offset + 1
             }
             1 => {
                 if offset + 1 >= self.code.len() {
@@ -87,18 +82,18 @@ impl Chunk {
                     }
                     _ => println!("{:?} {:4} ", opcode, operand),
                 }
-                Ok(offset + 2)
+                offset + 2
             }
             2 => {
                 if offset + 2 >= self.code.len() {
                     println!("ERROR: {:?} missing operands", opcode);
-                    return Ok(offset + 1);
+                    return offset + 1;
                 }
                 let operand1 = self.code[offset + 1];
                 let operand2 = self.code[offset + 2];
 
                 println!("{:?} {:02x}{:02x}", opcode, operand1, operand2);
-                Ok(offset + 3)
+                offset + 3
             }
             _ => {
                 panic!(

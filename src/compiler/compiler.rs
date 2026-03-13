@@ -1,9 +1,12 @@
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    ptr::NonNull,
+};
 
 use crate::{
     common::{OpCode, Value},
     compiler::scanner::{Scanner, Token, TokenType},
-    object::ObjStringPtr,
+    object::{ObjFunction, ObjString, ObjStringPtr, Object},
     vm::{
         Chunk, Heap,
         vm::{GlobalIndices, VMError},
@@ -78,17 +81,39 @@ impl Display for CompileError {
         )
     }
 }
+
+#[derive(Debug)]
+enum FunctionType {
+    Function,
+    Script,
+}
+
+#[derive(Debug)]
+struct FunctionState<'src> {
+    pub function: ObjFunction,
+    pub locals: Vec<Local<'src>>,
+    pub scope_depth: u8,
+}
+
+impl<'src> FunctionState<'src> {
+    pub fn new(name: Option<NonNull<ObjString>>) -> Self {
+        Self {
+            function: ObjFunction::new(name),
+            locals: Vec::with_capacity(u8::MAX as usize),
+            scope_depth: 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Compiler<'src> {
-    chunk: Chunk,
+    functions: Vec<FunctionState<'src>>,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
     heap: &'src mut Heap,
     global_indices: &'src mut GlobalIndices,
     errors: Vec<CompileError>,
-    locals: Vec<Local<'src>>,
-    scope_depth: u8,
     can_assign: bool,
     had_error: bool,
     panic_mode: bool,
@@ -99,33 +124,36 @@ impl<'src> Compiler<'src> {
         source: &'src str,
         heap: &mut Heap,
         global_indices: &mut GlobalIndices,
-    ) -> Result<Chunk, VMError> {
+    ) -> Result<ObjFunction, VMError> {
         let mut compiler = Compiler {
-            chunk: Chunk::new(),
+            functions: vec![FunctionState::new(None)],
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
             heap: heap,
             global_indices,
             errors: Vec::new(),
-            locals: Vec::with_capacity(u8::MAX as usize),
-            scope_depth: 0,
             can_assign: false,
             had_error: false,
             panic_mode: false,
         };
+        // reserve slot 0 for function itself
+        compiler.current_mut().locals.push(Local {
+            token: Token::default(),
+            depth: 0,
+        });
 
         compiler.advance();
         while !compiler.matches(TokenType::EOF) {
             compiler.declaration();
         }
-        compiler.end_compiler();
+        let func = compiler.end_compiler();
 
         if compiler.had_error {
             return Err(VMError::CompileError(compiler.errors));
         }
 
-        Ok(compiler.chunk)
+        Ok(func)
     }
 
     fn advance(&mut self) {
@@ -157,35 +185,69 @@ impl<'src> Compiler<'src> {
         true
     }
 
-    fn end_compiler(&mut self) {
+    fn end_compiler(&mut self) -> ObjFunction {
+        self.emit_return();
         #[cfg(debug_assertions)]
         {
             if !self.had_error {
-                let _ = self.chunk.disassemble("code");
+                self.current_chunk_mut().disassemble("script");
             }
         }
-        self.emit_return()
+        self.functions.pop().unwrap().function
+    }
+
+    fn end_function(&mut self) -> ObjFunction {
+        self.emit_return();
+        #[cfg(debug_assertions)]
+        {
+            if !self.had_error {
+                if let Some(name) = self.current().function.name {
+                    self.current_chunk_mut()
+                        .disassemble(unsafe { name.as_ref() });
+                } else {
+                    self.current_chunk_mut().disassemble("script");
+                }
+            }
+        }
+        self.functions.pop().unwrap().function
+    }
+
+    fn begin_function(&mut self) {
+        let name = self.heap.alloc_string(self.previous.lexeme);
+        let name_ptr = match &*name {
+            Object::String(s) => Some(NonNull::from(s)),
+            _ => unreachable!(),
+        };
+        self.functions.push(FunctionState::new(name_ptr));
+        // reserve slot 0 for function itself
+        self.current_mut().locals.push(Local {
+            token: Token::default(),
+            depth: 0,
+        });
     }
 
     fn begin_scope(&mut self) {
-        self.scope_depth += 1;
+        self.current_mut().scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.scope_depth -= 1;
+        self.current_mut().scope_depth -= 1;
+
+        let scope_depth = self.current().scope_depth;
 
         while self
+            .current()
             .locals
             .last()
-            .map_or(false, |l| l.depth > self.scope_depth)
+            .map_or(false, |l| l.depth > scope_depth)
         {
             self.emit_byte(OpCode::Pop);
-            self.locals.pop();
+            self.current_mut().locals.pop();
         }
     }
 
     fn emit_byte(&mut self, byte: impl Into<u8>) {
-        self.chunk.write_byte(byte.into());
+        self.current_chunk_mut().write_byte(byte.into());
     }
 
     fn emit_bytes(&mut self, byte1: impl Into<u8>, byte2: impl Into<u8>) {
@@ -196,7 +258,7 @@ impl<'src> Compiler<'src> {
     fn emit_loop(&mut self, loop_start: usize) {
         self.emit_byte(OpCode::Loop);
 
-        let offset = self.chunk.code.len() - loop_start + 2;
+        let offset = self.current_chunk_mut().code.len() - loop_start + 2;
         if offset > u16::MAX as usize {
             self.error_at_current("Loop body too large.");
         }
@@ -209,26 +271,36 @@ impl<'src> Compiler<'src> {
         self.emit_byte(opcode);
         self.emit_byte(0xff);
         self.emit_byte(0xff);
-        self.chunk.code.len() - 2
+        self.current_chunk_mut().code.len() - 2
     }
 
     fn patch_jump(&mut self, offset: usize) {
-        let jump = self.chunk.code.len() - offset - 2;
+        let jump = self.current_chunk_mut().code.len() - offset - 2;
         if jump > u16::MAX as usize {
             self.error_at_current("Too much code to jump over.");
         }
 
-        self.chunk.code[offset] = ((jump >> 8) & 0xff) as u8;
-        self.chunk.code[offset + 1] = (jump & 0xff) as u8;
+        self.current_chunk_mut().code[offset] = ((jump >> 8) & 0xff) as u8;
+        self.current_chunk_mut().code[offset + 1] = (jump & 0xff) as u8;
     }
 
     fn emit_const(&mut self, value: Value) {
-        let index = self.chunk.add_constant(value);
+        let index = self.make_constant(value);
         self.emit_byte(OpCode::Constant);
         self.emit_byte(index);
     }
 
+    fn make_constant(&mut self, value: Value) -> u8 {
+        let idx = self.current_chunk_mut().add_constant(value);
+        if idx > u8::MAX {
+            self.error_at_current("Too many constants in one chunk.");
+            return 0;
+        }
+        idx as u8
+    }
+
     fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Nil);
         self.emit_byte(OpCode::Return);
     }
 
@@ -245,7 +317,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn resolve_local(&mut self, name: &str) -> Option<u8> {
-        for (i, local) in self.locals.iter().enumerate().rev() {
+        for (i, local) in self.current_mut().locals.iter().enumerate().rev() {
             if local.token.lexeme == name {
                 if local.depth == u8::MAX {
                     self.error_at_current("Can't read local variable in its own initializer.");
@@ -268,26 +340,28 @@ impl<'src> Compiler<'src> {
     }
 
     fn add_local(&mut self, token: Token<'src>) {
-        if self.locals.len() == u8::MAX as usize {
+        if self.current_mut().locals.len() == u8::MAX as usize {
             self.error_at_current("Too many variables in function.");
             return;
         }
-        self.locals.push(Local {
+        self.current_mut().locals.push(Local {
             token,
             depth: u8::MAX,
         });
     }
 
     fn declare_variable(&mut self) {
-        if self.scope_depth == 0 {
+        if self.current_mut().scope_depth == 0 {
             return;
         }
         let token = self.previous;
+        let current_depth = self.current().scope_depth;
         let duplicate = self
+            .current()
             .locals
             .iter()
             .rev()
-            .take_while(|l| l.depth >= self.scope_depth)
+            .take_while(|l| l.depth >= current_depth)
             .any(|l| l.token.lexeme == token.lexeme);
         if duplicate {
             self.error_at_current("Already a variable with this name in this scope.");
@@ -298,19 +372,37 @@ impl<'src> Compiler<'src> {
     fn parse_variable(&mut self, message: &str) -> u8 {
         self.consume(TokenType::Identifier, message);
         self.declare_variable();
-        if self.scope_depth > 0 {
+        if self.current_mut().scope_depth > 0 {
             return 0;
         }
         self.global_slot(self.previous.lexeme)
     }
 
     fn define_variable(&mut self, var: u8) {
-        if self.scope_depth > 0 {
+        if self.current_mut().scope_depth > 0 {
             // mark initialized
-            self.locals.last_mut().unwrap().depth = self.scope_depth;
+            self.current_mut().locals.last_mut().unwrap().depth = self.current_mut().scope_depth;
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal, var);
+    }
+
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count = 0;
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == 255 {
+                    self.error_at_current("Can't have more than 255 arguments.");
+                }
+                arg_count += 1;
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expected ')' after arguments.");
+        arg_count
     }
 
     fn var_declaration(&mut self) {
@@ -327,6 +419,13 @@ impl<'src> Compiler<'src> {
         );
 
         self.define_variable(var);
+    }
+
+    fn function_declaration(&mut self) {
+        let global = self.parse_variable("Expected function name.");
+        self.mark_initialized();
+        self.function();
+        self.define_variable(global);
     }
 
     fn expression_statement(&mut self) {
@@ -417,7 +516,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn while_statement(&mut self) {
-        let loop_start = self.chunk.code.len();
+        let loop_start = self.current_chunk_mut().code.len();
         self.consume(TokenType::LeftParen, "Expected '(' after 'while'.");
         self.expression();
         self.consume(TokenType::RightParen, "Expected ')' after 'if'.");
@@ -442,7 +541,7 @@ impl<'src> Compiler<'src> {
             self.expression_statement();
         }
 
-        let mut loop_start = self.chunk.code.len();
+        let mut loop_start = self.current_chunk_mut().code.len();
         let mut exit_jump: Option<usize> = None;
 
         if !self.matches(TokenType::Semicolon) {
@@ -455,7 +554,7 @@ impl<'src> Compiler<'src> {
 
         if !self.matches(TokenType::RightParen) {
             let body_jump = self.emit_jump(OpCode::Jump);
-            let increment_start = self.chunk.code.len();
+            let increment_start = self.current_chunk_mut().code.len();
             self.expression();
             self.emit_byte(OpCode::Pop);
             self.consume(TokenType::RightParen, "Expected ')' after 'for' clauses.");
@@ -499,6 +598,19 @@ impl<'src> Compiler<'src> {
         self.emit_byte(OpCode::Print);
     }
 
+    fn return_statement(&mut self) {
+        if self.functions.is_empty() {
+            self.error_at_current("Can't return from top-level code.");
+        }
+        if self.matches(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expected ';' after return value.");
+            self.emit_byte(OpCode::Return);
+        }
+    }
+
     fn synchronize(&mut self) {
         self.panic_mode = false;
         while self.current.kind != TokenType::EOF {
@@ -521,7 +633,9 @@ impl<'src> Compiler<'src> {
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::Var) {
+        if self.matches(TokenType::Fun) {
+            self.function_declaration();
+        } else if self.matches(TokenType::Var) {
             self.var_declaration();
         } else {
             self.statement();
@@ -541,6 +655,8 @@ impl<'src> Compiler<'src> {
             self.end_scope();
         } else if self.matches(TokenType::If) {
             self.if_statement();
+        } else if self.matches(TokenType::Return) {
+            self.return_statement();
         } else if self.matches(TokenType::Switch) {
             self.switch_statement();
         } else if self.matches(TokenType::While) {
@@ -605,6 +721,11 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    fn call(&mut self) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call, arg_count);
+    }
+
     fn variable(&mut self) {
         let name = self.previous.lexeme;
 
@@ -620,6 +741,34 @@ impl<'src> Compiler<'src> {
         } else {
             self.emit_bytes(get_op, arg);
         }
+    }
+
+    fn function(&mut self) {
+        self.begin_function();
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expected '(' after function name.");
+        if !self.check(TokenType::RightParen) {
+            for arity in 1.. {
+                self.current_mut().function.arity = arity;
+                if arity > 255 {
+                    self.error_at_current("Can't have more than 255 parameters.");
+                }
+
+                let constant = self.parse_variable("Expected parameter name.");
+                self.define_variable(constant);
+
+                if !self.matches(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expected ')' after parameters.");
+        self.consume(TokenType::LeftBrace, "Expected '{' before function body.");
+        self.block();
+        let func = self.end_function();
+        let func_ref = self.heap.alloc(Object::Function(func));
+        let idx = self.make_constant(Value::Obj(func_ref));
+        self.emit_bytes(OpCode::Constant, idx);
     }
 
     fn string(&mut self) {
@@ -675,8 +824,8 @@ impl<'src> Compiler<'src> {
         match token_type {
             TokenType::LeftParen => ParseRule {
                 prefix: Some(Compiler::grouping),
-                infix: None,
-                precedence: Precedence::None,
+                infix: Some(Compiler::call),
+                precedence: Precedence::Call,
             },
             TokenType::Minus => ParseRule {
                 prefix: Some(Compiler::unary),
@@ -756,6 +905,23 @@ impl<'src> Compiler<'src> {
                 infix: None,
                 precedence: Precedence::None,
             },
+        }
+    }
+
+    fn current_chunk_mut(&mut self) -> &mut Chunk {
+        &mut self.current_mut().function.chunk
+    }
+    fn current_mut(&mut self) -> &mut FunctionState<'src> {
+        self.functions.last_mut().unwrap()
+    }
+
+    fn current(&mut self) -> &FunctionState<'src> {
+        self.functions.last().unwrap()
+    }
+
+    fn mark_initialized(&mut self) {
+        if self.current_mut().scope_depth != 0 {
+            self.current_mut().locals.last_mut().unwrap().depth = self.current_mut().scope_depth;
         }
     }
 }

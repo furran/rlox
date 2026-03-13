@@ -1,7 +1,7 @@
 use core::fmt;
 use std::ops::Neg;
 
-use crate::object::{ObjRef, Object};
+use crate::object::ObjRef;
 
 macro_rules! define_instructions {
     (
@@ -65,6 +65,7 @@ define_instructions! {
     Less,
     Print,
     Pop,
+    Call(arg_count: u8),
     Return,
 
     SetLocal(index: u8),
@@ -124,10 +125,7 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "Nil"),
             Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
-            Value::Obj(obj) => match &**obj {
-                Object::String(obj_string) => write!(f, "{}", &(**obj_string)),
-                _ => todo!(),
-            },
+            Value::Obj(obj) => write!(f, "{}", &**obj),
         }
     }
 }
