@@ -241,7 +241,8 @@ impl<'src> Compiler<'src> {
     }
 
     fn emit_byte(&mut self, byte: impl Into<u8>) {
-        self.current_chunk_mut().write_byte(byte.into());
+        let line = self.previous.line;
+        self.current_chunk_mut().write_byte(byte.into(), line);
     }
 
     fn emit_bytes(&mut self, byte1: impl Into<u8>, byte2: impl Into<u8>) {

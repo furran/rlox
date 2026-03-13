@@ -24,8 +24,19 @@ impl Chunk {
         }
     }
 
-    pub fn write_byte(&mut self, byte: u8) {
+    pub fn write_byte(&mut self, byte: u8, line: usize) {
         self.code.push(byte);
+        if self
+            .line_starts
+            .last()
+            .map(|ls| ls.line != line)
+            .unwrap_or(true)
+        {
+            self.line_starts.push(LineStart {
+                offset: self.code.len() - 1,
+                line,
+            });
+        }
     }
 
     pub fn add_constant(&mut self, value: Value) -> u8 {
