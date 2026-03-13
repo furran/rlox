@@ -1,4 +1,4 @@
-use rlox::vm::VM;
+use rlox::vm::{VM, vm::VMError};
 
 fn run(source: &str) -> String {
     let mut output = Vec::new();
@@ -198,6 +198,115 @@ fn test_switch_does_not_affect_stack() {
         print x;
     "#);
     assert_eq!(output, "one\n1\n");
+}
+
+#[test]
+fn test_basic_function_call() {
+    let output = run(r#"
+        fun greet() {
+            print "hello";
+        }
+        greet();
+    "#);
+    assert_eq!(output.trim(), "hello");
+}
+
+#[test]
+fn test_function_with_return_value() {
+    let output = run(r#"
+        fun answer() {
+            return 42;
+        }
+        print answer();
+    "#);
+    assert_eq!(output.trim(), "42");
+}
+
+#[test]
+fn test_function_with_args() {
+    let output = run(r#"
+        fun add(a, b) {
+            return a + b;
+        }
+        print add(1, 2);
+    "#);
+    assert_eq!(output.trim(), "3");
+}
+
+#[test]
+fn test_function_wrong_arg_count() {
+    let mut vm = VM::new(Vec::new());
+    let result = vm.interpret(
+        r#"
+        fun add(a, b) {
+            return a + b;
+        }
+        add(1);
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_function_as_value() {
+    let output = run(r#"
+        fun greet() {
+            print "hello";
+        }
+        var f = greet;
+        f();
+    "#);
+    assert_eq!(output.trim(), "hello");
+}
+
+#[test]
+fn test_recursive_function() {
+    let output = run(r#"
+        fun fib(n) {
+            if (n <= 1) return n;
+            return fib(n - 1) + fib(n - 2);
+        }
+        print fib(10);
+    "#);
+    assert_eq!(output.trim(), "55");
+}
+
+#[test]
+fn test_nested_function_calls() {
+    let output = run(r#"
+        fun inner() {
+            return 1;
+        }
+        fun outer() {
+            return inner() + 1;
+        }
+        print outer();
+    "#);
+    assert_eq!(output.trim(), "2");
+}
+
+#[test]
+fn test_function_stack_trace_on_error() {
+    let mut vm = VM::new(Vec::new());
+    let result = vm.interpret(
+        r#"
+        fun inner() {
+            return undefined;
+        }
+        fun outer() {
+            return inner();
+        }
+        outer();
+    "#,
+    );
+    match result {
+        Err(VMError::RuntimeError(msg)) => {
+            assert!(msg.contains("inner"));
+            assert!(msg.contains("outer"));
+            assert!(msg.contains("script"));
+        }
+        _ => panic!("Expected runtime error"),
+    }
 }
 
 #[test]

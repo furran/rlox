@@ -83,12 +83,6 @@ impl Display for CompileError {
 }
 
 #[derive(Debug)]
-enum FunctionType {
-    Function,
-    Script,
-}
-
-#[derive(Debug)]
 struct FunctionState<'src> {
     pub function: ObjFunction,
     pub locals: Vec<Local<'src>>,
