@@ -143,6 +143,7 @@ pub struct VM<W: Write> {
     globals: Vec<Option<Value>>,
     global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
+    open_upvalues: HashMap<usize, Upvalue>,
     output: W,
 }
 
@@ -154,6 +155,7 @@ impl<W: Write> VM<W> {
             globals: Vec::new(),
             global_indices: GlobalIndices::default(),
             frames: Vec::with_capacity(64),
+            open_upvalues: HashMap::new(),
             output,
         }
     }
@@ -265,9 +267,14 @@ impl<W: Write> VM<W> {
                         self.stack.push(Value::Obj(closure_ref));
                     }
                 }
+                OpCode::CloseUpvalue => {
+                    self.close_upvalues(self.stack.top);
+                    self.stack.pop();
+                }
                 OpCode::Return => {
                     let result = self.stack.pop();
                     let slot_offset = self.current_frame().slot_offset;
+                    self.close_upvalues(slot_offset);
                     self.frames.pop();
 
                     if self.frames.is_empty() {
@@ -407,8 +414,26 @@ impl<W: Write> VM<W> {
     }
 
     fn capture_upvalue(&mut self, slot: usize) -> Upvalue {
+        if let Some(existing) = self.open_upvalues.get(&slot) {
+            return existing.clone();
+        }
         let upvalue = Rc::new(Cell::new(self.stack[slot]));
+        self.open_upvalues.insert(slot, upvalue.clone());
         upvalue
+    }
+
+    fn close_upvalues(&mut self, last: usize) {
+        let slots_to_close = self
+            .open_upvalues
+            .keys()
+            .filter(|&&slot| slot >= last)
+            .copied()
+            .collect::<Vec<usize>>();
+        for slot in slots_to_close {
+            if let Some(upvalue) = self.open_upvalues.remove(&slot) {
+                upvalue.set(self.stack[slot]);
+            }
+        }
     }
 
     fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {

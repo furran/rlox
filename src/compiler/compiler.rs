@@ -42,6 +42,7 @@ struct ParseRule<'src> {
 struct Local<'src> {
     token: Token<'src>,
     depth: u8,
+    is_captured: bool,
 }
 
 impl<'src> Default for Local<'src> {
@@ -49,6 +50,7 @@ impl<'src> Default for Local<'src> {
         Self {
             token: Default::default(),
             depth: u8::MAX,
+            is_captured: false,
         }
     }
 }
@@ -143,6 +145,7 @@ impl<'src> Compiler<'src> {
         compiler.current_context_mut().locals.push(Local {
             token: Token::default(),
             depth: 0,
+            is_captured: false,
         });
 
         compiler.advance();
@@ -225,6 +228,7 @@ impl<'src> Compiler<'src> {
         self.current_context_mut().locals.push(Local {
             token: Token::default(),
             depth: 0,
+            is_captured: false,
         });
     }
 
@@ -243,7 +247,11 @@ impl<'src> Compiler<'src> {
             .last()
             .map_or(false, |l| l.depth > scope_depth)
         {
-            self.emit_byte(OpCode::Pop);
+            if self.current_context().locals.last().unwrap().is_captured {
+                self.emit_byte(OpCode::CloseUpvalue);
+            } else {
+                self.emit_byte(OpCode::Pop);
+            }
             self.current_context_mut().locals.pop();
         }
     }
@@ -356,6 +364,7 @@ impl<'src> Compiler<'src> {
         let (current, enclosing) = function_states.split_last_mut().unwrap();
 
         if let Some(local_slot) = Self::resolve_local_in(name, enclosing) {
+            enclosing.last_mut().unwrap().locals[local_slot as usize].is_captured = true;
             return Some(Self::add_upvalue(current, local_slot, true));
         }
 
@@ -403,6 +412,7 @@ impl<'src> Compiler<'src> {
         self.current_context_mut().locals.push(Local {
             token,
             depth: u8::MAX,
+            is_captured: false,
         });
     }
 

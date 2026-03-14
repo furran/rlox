@@ -67,6 +67,7 @@ define_instructions! {
     Pop,
     Call(arg_count: u8),
     Closure(index: u8),
+    CloseUpvalue,
     Return,
 
     SetLocal(index: u8),

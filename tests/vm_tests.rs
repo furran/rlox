@@ -48,6 +48,22 @@ fn test_global_variable_uninitialized() {
 }
 
 #[test]
+fn test_undefined_variable_is_runtime_error() {
+    let mut output = Vec::new();
+    let mut vm = VM::new(&mut output);
+    let result = vm.interpret("print undefined;");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_type_error_in_arithmetic() {
+    let mut output = Vec::new();
+    let mut vm = VM::new(&mut output);
+    let result = vm.interpret(r#"print "string" - 1;"#);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_local_variable_scoping() {
     let output = run(r#"
         var x = "global";
@@ -343,22 +359,6 @@ fn test_closure_global_variable_and_local_variables() {
 }
 
 #[test]
-fn test_closure_outer_variable() {
-    let output = run(r#"
-    fun outer() {
-        var x = "outside";
-        fun inner() {
-            print x;
-        }
-        inner();
-    }
-    outer();
-    "#);
-
-    assert_eq!(output.trim(), "outside")
-}
-
-#[test]
 fn test_closure_undefined_variable() {
     let mut vm = VM::new(Vec::new());
     let result = vm.interpret(
@@ -377,17 +377,81 @@ fn test_closure_undefined_variable() {
 }
 
 #[test]
-fn test_undefined_variable_is_runtime_error() {
-    let mut output = Vec::new();
-    let mut vm = VM::new(&mut output);
-    let result = vm.interpret("print undefined;");
-    assert!(result.is_err());
+fn test_closure_closed_upvalues() {
+    let output = run(r#"
+        fun outer() {
+            var x = "outside";
+            fun inner() {
+                print x;
+            }
+
+            return inner;
+        }
+        var closure = outer();
+        closure();
+    "#);
+
+    assert_eq!(output.trim(), "outside");
 }
 
 #[test]
-fn test_type_error_in_arithmetic() {
-    let mut output = Vec::new();
-    let mut vm = VM::new(&mut output);
-    let result = vm.interpret(r#"print "string" - 1;"#);
-    assert!(result.is_err());
+fn test_closure_mutate_shared_upvalue() {
+    let output = run(r#"
+        var globalSet;
+        var globalGet;
+
+        fun main() {
+            var a = "initial";
+
+            fun set() { a = "updated"; }
+            fun get() { print a; }
+
+            globalSet = set;
+            globalGet = get;
+        }
+
+        main();
+        globalSet();
+        globalGet();
+    "#);
+    assert_eq!(output.trim(), "updated");
+}
+
+#[test]
+fn test_independent_closures_dont_share_state() {
+    let output = run(r#"
+        fun makeCounter() {
+            var count = 0;
+            fun increment() {
+                count = count + 1;
+                return count;
+            }
+            return increment;
+        }
+        var a = makeCounter();
+        var b = makeCounter();
+        print a();
+        print a();
+        print b();
+    "#);
+    assert_eq!(output, "1\n2\n1\n");
+}
+
+#[test]
+fn test_nested_closures() {
+    let output = run(r#"
+        fun outer() {
+            var x = 1;
+            fun middle() {
+                var y = 2;
+                fun inner() {
+                    return x + y;
+                }
+                return inner;
+            }
+            return middle;
+        }
+        print outer()()();
+    "#);
+    assert_eq!(output.trim(), "3");
 }
