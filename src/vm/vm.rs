@@ -1,16 +1,18 @@
 use std::{
+    cell::Cell,
     collections::HashMap,
     fmt::Debug,
     io::Write,
     mem::{self},
     ops::{Deref, DerefMut},
     ptr::NonNull,
+    rc::Rc,
 };
 
 use crate::{
     common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    object::{ObjFunction, ObjString, ObjStringPtr, Object},
+    object::{ObjClosure, ObjFunction, ObjString, ObjStringPtr, Object, Upvalue},
     vm::heap::Heap,
 };
 
@@ -119,14 +121,18 @@ impl DerefMut for GlobalIndices {
 
 #[derive(Debug, Clone, Copy)]
 struct CallFrame {
-    function: NonNull<ObjFunction>,
+    closure: NonNull<ObjClosure>,
     ip: usize,
     slot_offset: usize,
 }
 
 impl CallFrame {
+    pub fn get_closure(&self) -> &ObjClosure {
+        unsafe { self.closure.as_ref() }
+    }
+
     pub fn get_function(&self) -> &ObjFunction {
-        unsafe { self.function.as_ref() }
+        unsafe { self.closure.as_ref().function.as_ref() }
     }
 }
 
@@ -157,9 +163,20 @@ impl<W: Write> VM<W> {
     pub fn interpret(&mut self, source: &str) -> VMResult {
         let function = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
         let func_ref = self.heap.alloc(Object::Function(function));
-        self.stack.push(Value::Obj(func_ref));
+
         let func_ptr = func_ref.as_function().unwrap();
-        self.call(func_ptr, 0)?;
+        let closure = ObjClosure::new(func_ptr);
+        let closure_ref = self.heap.alloc(Object::Closure(closure));
+
+        self.stack.push(Value::Obj(closure_ref));
+
+        let closure_ptr = closure_ref.as_closure().unwrap();
+
+        self.frames.push(CallFrame {
+            closure: closure_ptr,
+            ip: 0,
+            slot_offset: 0,
+        });
 
         self.run()
     }
@@ -226,6 +243,28 @@ impl<W: Write> VM<W> {
                     let arg_count = self.read_byte() as usize;
                     self.call_value(self.stack.peek(arg_count), arg_count)?;
                 }
+                OpCode::Closure => {
+                    let idx = self.read_byte();
+                    let value = self.read_constant(idx);
+                    if let Value::Obj(obj_ref) = value {
+                        let func = obj_ref.as_function().unwrap();
+                        let mut closure = ObjClosure::new(func);
+                        let upvalue_count = unsafe { func.as_ref().upvalue_count };
+                        for _ in 0..upvalue_count {
+                            let is_local = self.read_byte() != 0;
+                            let index = self.read_byte() as usize;
+                            let uv = if is_local {
+                                self.capture_upvalue(self.current_frame().slot_offset + index)
+                            } else {
+                                self.current_frame().get_closure().upvalues[index].clone()
+                            };
+
+                            closure.upvalues.push(uv);
+                        }
+                        let closure_ref = self.heap.alloc(Object::Closure(closure));
+                        self.stack.push(Value::Obj(closure_ref));
+                    }
+                }
                 OpCode::Return => {
                     let result = self.stack.pop();
                     let slot_offset = self.current_frame().slot_offset;
@@ -237,6 +276,25 @@ impl<W: Write> VM<W> {
                     }
                     self.stack.truncate(slot_offset);
                     self.stack.push(result);
+                }
+                OpCode::SetLocal => {
+                    let slot = self.read_byte() as usize;
+                    let slot_offset = self.current_frame().slot_offset;
+                    self.stack[slot + slot_offset] = self.stack.peek(0);
+                }
+                OpCode::GetLocal => {
+                    let slot = self.read_byte() as usize;
+                    let slot_offset = self.current_frame().slot_offset;
+                    self.stack.push(self.stack[slot + slot_offset]);
+                }
+                OpCode::SetUpvalue => {
+                    let slot = self.read_byte() as usize;
+                    self.current_frame().get_closure().upvalues[slot].set(self.stack.peek(0));
+                }
+                OpCode::GetUpvalue => {
+                    let slot = self.read_byte() as usize;
+                    let value = self.current_frame().get_closure().upvalues[slot].get();
+                    self.stack.push(value);
                 }
                 OpCode::DefineGlobal => {
                     let slot = self.read_byte() as usize;
@@ -259,16 +317,6 @@ impl<W: Write> VM<W> {
                         Some(Some(value)) => self.stack.push(*value),
                         _ => return self.runtime_error("Undefined variable."),
                     }
-                }
-                OpCode::SetLocal => {
-                    let slot = self.read_byte() as usize;
-                    let slot_offset = self.current_frame().slot_offset;
-                    self.stack[slot + slot_offset] = self.stack.peek(0);
-                }
-                OpCode::GetLocal => {
-                    let slot = self.read_byte() as usize;
-                    let slot_offset = self.current_frame().slot_offset;
-                    self.stack.push(self.stack[slot + slot_offset]);
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_short() as usize;
@@ -308,7 +356,7 @@ impl<W: Write> VM<W> {
 
     fn read_constant(&self, idx: u8) -> Value {
         let frame = self.current_frame();
-        unsafe { frame.function.as_ref().chunk.constants[idx as usize] }
+        frame.get_function().chunk.constants[idx as usize]
     }
 
     fn read_opcode(&mut self) -> OpCode {
@@ -330,8 +378,8 @@ impl<W: Write> VM<W> {
         }
     }
 
-    fn call(&mut self, function: NonNull<ObjFunction>, arg_count: usize) -> VMResult {
-        let arity = unsafe { function.as_ref().arity as usize };
+    fn call(&mut self, closure: &ObjClosure, arg_count: usize) -> VMResult {
+        let arity = unsafe { closure.function.as_ref().arity as usize };
         if arg_count != arity {
             return self.runtime_error(format!(
                 "Expected {} argument(s) but got {}.",
@@ -341,7 +389,7 @@ impl<W: Write> VM<W> {
 
         self.stack.print();
         self.frames.push(CallFrame {
-            function,
+            closure: NonNull::from_ref(closure),
             ip: 0,
             slot_offset: self.stack.len() - arg_count - 1,
         });
@@ -351,11 +399,16 @@ impl<W: Write> VM<W> {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> VMResult {
         match callee {
             Value::Obj(obj_ref) => match &*obj_ref {
-                Object::Function(f) => self.call(NonNull::from(f), arg_count),
+                Object::Closure(c) => self.call(c, arg_count),
                 _ => self.runtime_error("Can only call functions and classes."),
             },
             _ => self.runtime_error("Can only call functions and classes."),
         }
+    }
+
+    fn capture_upvalue(&mut self, slot: usize) -> Upvalue {
+        let upvalue = Rc::new(Cell::new(self.stack[slot]));
+        upvalue
     }
 
     fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {
@@ -369,7 +422,7 @@ impl<W: Write> VM<W> {
         let mut error = format!("{}\n", message);
 
         for frame in self.frames.iter().rev() {
-            let function = unsafe { frame.function.as_ref() };
+            let function = frame.get_function();
             let ip = frame.ip - 1;
             let line = function.chunk.get_line(ip);
             match &function.name {

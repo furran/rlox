@@ -66,10 +66,14 @@ define_instructions! {
     Print,
     Pop,
     Call(arg_count: u8),
+    Closure(index: u8),
     Return,
 
     SetLocal(index: u8),
     GetLocal(index: u8),
+
+    SetUpvalue(index: u8),
+    GetUpvalue(index: u8),
 
     DefineGlobal(index: u8),
     SetGlobal(index: u8),

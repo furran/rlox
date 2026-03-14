@@ -82,18 +82,26 @@ impl Display for CompileError {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Upvalue {
+    pub index: u8,
+    pub is_local: bool,
+}
+
 #[derive(Debug)]
-struct FunctionState<'src> {
+struct FunctionContext<'src> {
     pub function: ObjFunction,
     pub locals: Vec<Local<'src>>,
+    pub upvalues: Vec<Upvalue>,
     pub scope_depth: u8,
 }
 
-impl<'src> FunctionState<'src> {
+impl<'src> FunctionContext<'src> {
     pub fn new(name: Option<NonNull<ObjString>>) -> Self {
         Self {
             function: ObjFunction::new(name),
             locals: Vec::with_capacity(u8::MAX as usize),
+            upvalues: Vec::new(),
             scope_depth: 0,
         }
     }
@@ -101,7 +109,7 @@ impl<'src> FunctionState<'src> {
 
 #[derive(Debug)]
 pub struct Compiler<'src> {
-    functions: Vec<FunctionState<'src>>,
+    contexts: Vec<FunctionContext<'src>>,
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
@@ -120,7 +128,7 @@ impl<'src> Compiler<'src> {
         global_indices: &mut GlobalIndices,
     ) -> Result<ObjFunction, VMError> {
         let mut compiler = Compiler {
-            functions: vec![FunctionState::new(None)],
+            contexts: vec![FunctionContext::new(None)],
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
@@ -132,7 +140,7 @@ impl<'src> Compiler<'src> {
             panic_mode: false,
         };
         // reserve slot 0 for function itself
-        compiler.current_mut().locals.push(Local {
+        compiler.current_context_mut().locals.push(Local {
             token: Token::default(),
             depth: 0,
         });
@@ -187,15 +195,15 @@ impl<'src> Compiler<'src> {
                 self.current_chunk_mut().disassemble("script");
             }
         }
-        self.functions.pop().unwrap().function
+        self.contexts.pop().unwrap().function
     }
 
-    fn end_function(&mut self) -> ObjFunction {
+    fn end_function(&mut self) -> FunctionContext<'_> {
         self.emit_return();
         #[cfg(debug_assertions)]
         {
             if !self.had_error {
-                if let Some(name) = self.current().function.name {
+                if let Some(name) = self.current_context().function.name {
                     self.current_chunk_mut()
                         .disassemble(unsafe { name.as_ref() });
                 } else {
@@ -203,7 +211,7 @@ impl<'src> Compiler<'src> {
                 }
             }
         }
-        self.functions.pop().unwrap().function
+        self.contexts.pop().unwrap()
     }
 
     fn begin_function(&mut self) {
@@ -212,31 +220,31 @@ impl<'src> Compiler<'src> {
             Object::String(s) => Some(NonNull::from(s)),
             _ => unreachable!(),
         };
-        self.functions.push(FunctionState::new(name_ptr));
+        self.contexts.push(FunctionContext::new(name_ptr));
         // reserve slot 0 for function itself
-        self.current_mut().locals.push(Local {
+        self.current_context_mut().locals.push(Local {
             token: Token::default(),
             depth: 0,
         });
     }
 
     fn begin_scope(&mut self) {
-        self.current_mut().scope_depth += 1;
+        self.current_context_mut().scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.current_mut().scope_depth -= 1;
+        self.current_context_mut().scope_depth -= 1;
 
-        let scope_depth = self.current().scope_depth;
+        let scope_depth = self.current_context().scope_depth;
 
         while self
-            .current()
+            .current_context()
             .locals
             .last()
             .map_or(false, |l| l.depth > scope_depth)
         {
             self.emit_byte(OpCode::Pop);
-            self.current_mut().locals.pop();
+            self.current_context_mut().locals.pop();
         }
     }
 
@@ -312,7 +320,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn resolve_local(&mut self, name: &str) -> Option<u8> {
-        for (i, local) in self.current_mut().locals.iter().enumerate().rev() {
+        for (i, local) in self.current_context_mut().locals.iter().enumerate().rev() {
             if local.token.lexeme == name {
                 if local.depth == u8::MAX {
                     self.error_at_current("Can't read local variable in its own initializer.");
@@ -321,6 +329,59 @@ impl<'src> Compiler<'src> {
             }
         }
         None
+    }
+
+    fn resolve_local_in(name: &str, functions: &[FunctionContext]) -> Option<u8> {
+        let locals = &functions.last()?.locals;
+        for (i, local) in locals.iter().enumerate().rev() {
+            if local.token.lexeme == name {
+                if local.depth == u8::MAX {
+                    return None;
+                }
+                return Some(i as u8);
+            }
+        }
+        None
+    }
+
+    fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
+        Self::resolve_upvalue_in(name, &mut self.contexts)
+    }
+
+    fn resolve_upvalue_in(name: &str, function_states: &mut [FunctionContext]) -> Option<u8> {
+        if function_states.len() < 2 {
+            return None;
+        }
+
+        let (current, enclosing) = function_states.split_last_mut().unwrap();
+
+        if let Some(local_slot) = Self::resolve_local_in(name, enclosing) {
+            return Some(Self::add_upvalue(current, local_slot, true));
+        }
+
+        if let Some(upvalue_slot) = Self::resolve_upvalue_in(name, enclosing) {
+            return Some(Self::add_upvalue(current, upvalue_slot, false));
+        }
+
+        None
+    }
+
+    fn add_upvalue(function_state: &mut FunctionContext, index: u8, is_local: bool) -> u8 {
+        if let Some(i) = function_state
+            .upvalues
+            .iter()
+            .position(|uv| uv.index == index && uv.is_local == is_local)
+        {
+            return i as u8;
+        }
+
+        let count = function_state.upvalues.len() as u8;
+        // if count >= u8::MAX {
+        //     return Err("Too many closure variables in function.");
+        // }
+        function_state.upvalues.push(Upvalue { index, is_local });
+        function_state.function.upvalue_count = count + 1;
+        count
     }
 
     fn global_slot(&mut self, name: &str) -> u8 {
@@ -335,24 +396,24 @@ impl<'src> Compiler<'src> {
     }
 
     fn add_local(&mut self, token: Token<'src>) {
-        if self.current_mut().locals.len() == u8::MAX as usize {
+        if self.current_context_mut().locals.len() == u8::MAX as usize {
             self.error_at_current("Too many variables in function.");
             return;
         }
-        self.current_mut().locals.push(Local {
+        self.current_context_mut().locals.push(Local {
             token,
             depth: u8::MAX,
         });
     }
 
     fn declare_variable(&mut self) {
-        if self.current_mut().scope_depth == 0 {
+        if self.current_context_mut().scope_depth == 0 {
             return;
         }
         let token = self.previous;
-        let current_depth = self.current().scope_depth;
+        let current_depth = self.current_context().scope_depth;
         let duplicate = self
-            .current()
+            .current_context()
             .locals
             .iter()
             .rev()
@@ -367,16 +428,17 @@ impl<'src> Compiler<'src> {
     fn parse_variable(&mut self, message: &str) -> u8 {
         self.consume(TokenType::Identifier, message);
         self.declare_variable();
-        if self.current_mut().scope_depth > 0 {
+        if self.current_context_mut().scope_depth > 0 {
             return 0;
         }
         self.global_slot(self.previous.lexeme)
     }
 
     fn define_variable(&mut self, var: u8) {
-        if self.current_mut().scope_depth > 0 {
+        if self.current_context_mut().scope_depth > 0 {
             // mark initialized
-            self.current_mut().locals.last_mut().unwrap().depth = self.current_mut().scope_depth;
+            self.current_context_mut().locals.last_mut().unwrap().depth =
+                self.current_context_mut().scope_depth;
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal, var);
@@ -594,7 +656,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn return_statement(&mut self) {
-        if self.functions.is_empty() {
+        if self.contexts.is_empty() {
             self.error_at_current("Can't return from top-level code.");
         }
         if self.matches(TokenType::Semicolon) {
@@ -726,6 +788,8 @@ impl<'src> Compiler<'src> {
 
         let (get_op, set_op, arg) = if let Some(local_slot) = self.resolve_local(name) {
             (OpCode::GetLocal, OpCode::SetLocal, local_slot)
+        } else if let Some(slot) = self.resolve_upvalue(name) {
+            (OpCode::GetUpvalue, OpCode::SetUpvalue, slot)
         } else {
             (OpCode::GetGlobal, OpCode::SetGlobal, self.global_slot(name))
         };
@@ -744,8 +808,8 @@ impl<'src> Compiler<'src> {
         self.consume(TokenType::LeftParen, "Expected '(' after function name.");
         if !self.check(TokenType::RightParen) {
             for arity in 1.. {
-                self.current_mut().function.arity = arity;
-                if arity > 255 {
+                self.current_context_mut().function.arity = arity;
+                if arity >= 255 {
                     self.error_at_current("Can't have more than 255 parameters.");
                 }
 
@@ -760,10 +824,17 @@ impl<'src> Compiler<'src> {
         self.consume(TokenType::RightParen, "Expected ')' after parameters.");
         self.consume(TokenType::LeftBrace, "Expected '{' before function body.");
         self.block();
-        let func = self.end_function();
+        let function_context = self.end_function();
+        let func = function_context.function;
+        let upvalues = function_context.upvalues;
         let func_ref = self.heap.alloc(Object::Function(func));
         let idx = self.make_constant(Value::Obj(func_ref));
-        self.emit_bytes(OpCode::Constant, idx);
+        self.emit_bytes(OpCode::Closure, idx);
+
+        for uv in &upvalues {
+            self.emit_byte(uv.is_local as u8);
+            self.emit_byte(uv.index);
+        }
     }
 
     fn string(&mut self) {
@@ -904,19 +975,20 @@ impl<'src> Compiler<'src> {
     }
 
     fn current_chunk_mut(&mut self) -> &mut Chunk {
-        &mut self.current_mut().function.chunk
+        &mut self.current_context_mut().function.chunk
     }
-    fn current_mut(&mut self) -> &mut FunctionState<'src> {
-        self.functions.last_mut().unwrap()
+    fn current_context_mut(&mut self) -> &mut FunctionContext<'src> {
+        self.contexts.last_mut().unwrap()
     }
 
-    fn current(&mut self) -> &FunctionState<'src> {
-        self.functions.last().unwrap()
+    fn current_context(&self) -> &FunctionContext<'src> {
+        self.contexts.last().unwrap()
     }
 
     fn mark_initialized(&mut self) {
-        if self.current_mut().scope_depth != 0 {
-            self.current_mut().locals.last_mut().unwrap().depth = self.current_mut().scope_depth;
+        if self.current_context_mut().scope_depth != 0 {
+            self.current_context_mut().locals.last_mut().unwrap().depth =
+                self.current_context_mut().scope_depth;
         }
     }
 }

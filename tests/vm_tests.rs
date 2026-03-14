@@ -310,6 +310,73 @@ fn test_function_stack_trace_on_error() {
 }
 
 #[test]
+fn test_closure_global_variable() {
+    let output = run(r#"
+        var x = "global";
+        fun outer() {
+            fun inner() {
+                print x;
+            }
+            inner();
+        }
+        outer();
+    "#);
+
+    assert_eq!(output.trim(), "global");
+}
+
+#[test]
+fn test_closure_global_variable_and_local_variables() {
+    let output = run(r#"
+        var x = "global";
+        fun outer() {
+            var x = "outer";
+            fun inner() {
+                print x;
+            }
+            inner();
+        }
+        outer();
+    "#);
+
+    assert_eq!(output.trim(), "outer");
+}
+
+#[test]
+fn test_closure_outer_variable() {
+    let output = run(r#"
+    fun outer() {
+        var x = "outside";
+        fun inner() {
+            print x;
+        }
+        inner();
+    }
+    outer();
+    "#);
+
+    assert_eq!(output.trim(), "outside")
+}
+
+#[test]
+fn test_closure_undefined_variable() {
+    let mut vm = VM::new(Vec::new());
+    let result = vm.interpret(
+        r#"
+        fun outer() {
+            fun inner() {
+                print x;
+            }
+            inner();
+        }
+        outer();
+    "#,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_undefined_variable_is_runtime_error() {
     let mut output = Vec::new();
     let mut vm = VM::new(&mut output);

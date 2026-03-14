@@ -1,13 +1,15 @@
 use core::fmt;
 use std::{
     borrow::Borrow,
+    cell::Cell,
     fmt::Display,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
     ptr::NonNull,
+    rc::Rc,
 };
 
-use crate::vm::Chunk;
+use crate::{common::Value, vm::Chunk};
 
 #[derive(Debug, Clone)]
 pub struct ObjString {
@@ -99,7 +101,8 @@ impl ObjStringPtr {
 pub struct ObjFunction {
     pub chunk: Chunk,
     pub name: Option<NonNull<ObjString>>,
-    pub arity: u32,
+    pub arity: u8,
+    pub upvalue_count: u8,
 }
 
 impl Default for ObjFunction {
@@ -108,6 +111,7 @@ impl Default for ObjFunction {
             chunk: Chunk::new(),
             name: Default::default(),
             arity: Default::default(),
+            upvalue_count: 0,
         }
     }
 }
@@ -118,6 +122,7 @@ impl ObjFunction {
             chunk: Chunk::new(),
             name,
             arity: 0,
+            upvalue_count: 0,
         }
     }
 }
@@ -132,16 +137,39 @@ impl fmt::Display for ObjFunction {
 }
 
 #[derive(Debug)]
+pub struct ObjClosure {
+    pub function: NonNull<ObjFunction>,
+    pub upvalues: Vec<Upvalue>,
+}
+
+impl ObjClosure {
+    pub fn new(function: NonNull<ObjFunction>) -> Self {
+        Self {
+            function,
+            upvalues: Vec::new(),
+        }
+    }
+}
+
+pub type Upvalue = Rc<Cell<Value>>;
+
+#[derive(Debug)]
 pub enum Object {
     String(ObjString),
     Function(ObjFunction),
+    Closure(ObjClosure),
+    Upvalue(Upvalue),
 }
 
 impl Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            Object::String(obj_string) => write!(f, "{}", obj_string),
-            Object::Function(obj_function) => write!(f, "{}", obj_function),
+            Object::String(s) => write!(f, "{}", s),
+            Object::Function(fun) => write!(f, "{}", fun),
+            Object::Closure(c) => {
+                write!(f, "{}", unsafe { c.function.as_ref() })
+            }
+            Object::Upvalue(uv) => write!(f, "{}", uv.get()),
         }
     }
 }
@@ -153,6 +181,13 @@ impl ObjRef {
     pub fn as_function(&self) -> Option<NonNull<ObjFunction>> {
         match unsafe { self.0.as_ref() } {
             Object::Function(f) => Some(NonNull::from(f)),
+            _ => None,
+        }
+    }
+
+    pub fn as_closure(&self) -> Option<NonNull<ObjClosure>> {
+        match unsafe { self.0.as_ref() } {
+            Object::Closure(c) => Some(NonNull::from(c)),
             _ => None,
         }
     }
