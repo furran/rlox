@@ -1,19 +1,18 @@
 use std::{
-    cell::Cell,
     collections::HashMap,
     fmt::Debug,
     io::Write,
     mem::{self},
     ops::{Deref, DerefMut},
-    ptr::NonNull,
-    rc::Rc,
 };
+
+use rlox_gc::{Gc, Trace};
 
 use crate::{
     common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    object::{ObjClosure, ObjFunction, ObjString, ObjStringPtr, Object, Upvalue},
-    vm::heap::Heap,
+    object::{ObjClosure, ObjFunction, ObjString, Upvalue},
+    vm::heap::LoxHeap,
 };
 
 #[derive(Debug)]
@@ -24,13 +23,13 @@ pub enum VMError {
 
 pub type VMResult = Result<(), VMError>;
 
-#[derive(Debug)]
-struct Stack<T, const N: usize> {
+#[derive(Debug, Trace)]
+pub struct Stack<T: Trace, const N: usize> {
     data: [T; N],
     top: usize,
 }
 
-impl<T, const N: usize> Deref for Stack<T, N> {
+impl<T: Trace, const N: usize> Deref for Stack<T, N> {
     type Target = [T; N];
 
     fn deref(&self) -> &Self::Target {
@@ -38,14 +37,14 @@ impl<T, const N: usize> Deref for Stack<T, N> {
     }
 }
 
-impl<T, const N: usize> DerefMut for Stack<T, N> {
+impl<T: Trace, const N: usize> DerefMut for Stack<T, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }
 }
 
 #[allow(dead_code)]
-impl<T, const N: usize> Stack<T, N>
+impl<T: Trace, const N: usize> Stack<T, N>
 where
     T: Default,
     T: Debug,
@@ -103,10 +102,10 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct GlobalIndices(HashMap<ObjStringPtr, u8>);
+pub struct GlobalIndices(HashMap<Gc<ObjString>, u8>);
 
 impl Deref for GlobalIndices {
-    type Target = HashMap<ObjStringPtr, u8>;
+    type Target = HashMap<Gc<ObjString>, u8>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -119,31 +118,31 @@ impl DerefMut for GlobalIndices {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Trace)]
 struct CallFrame {
-    closure: NonNull<ObjClosure>,
+    closure: Gc<ObjClosure>,
     ip: usize,
     slot_offset: usize,
 }
 
 impl CallFrame {
     pub fn get_closure(&self) -> &ObjClosure {
-        unsafe { self.closure.as_ref() }
+        &self.closure
     }
 
     pub fn get_function(&self) -> &ObjFunction {
-        unsafe { self.closure.as_ref().function.as_ref() }
+        &self.closure.function
     }
 }
 
 #[derive(Debug)]
 pub struct VM<W: Write> {
     stack: Stack<Value, 256>,
-    heap: Heap,
+    heap: LoxHeap,
     globals: Vec<Option<Value>>,
     global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
-    open_upvalues: HashMap<usize, Upvalue>,
+    open_upvalues: HashMap<usize, Gc<Upvalue>>,
     output: W,
 }
 
@@ -151,7 +150,7 @@ impl<W: Write> VM<W> {
     pub fn new(output: W) -> Self {
         Self {
             stack: Stack::new(),
-            heap: Heap::new(),
+            heap: LoxHeap::new(),
             globals: Vec::new(),
             global_indices: GlobalIndices::default(),
             frames: Vec::with_capacity(64),
@@ -164,18 +163,15 @@ impl<W: Write> VM<W> {
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
         let function = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
-        let func_ref = self.heap.alloc(Object::Function(function));
+        let func_ref = self.heap.allocate(function);
 
-        let func_ptr = func_ref.as_function().unwrap();
-        let closure = ObjClosure::new(func_ptr);
-        let closure_ref = self.heap.alloc(Object::Closure(closure));
+        let closure = ObjClosure::new(func_ref);
+        let closure_ref = self.heap.allocate(closure);
 
-        self.stack.push(Value::Obj(closure_ref));
-
-        let closure_ptr = closure_ref.as_closure().unwrap();
+        self.stack.push(Value::Closure(closure_ref));
 
         self.frames.push(CallFrame {
-            closure: closure_ptr,
+            closure: closure_ref,
             ip: 0,
             slot_offset: 0,
         });
@@ -205,13 +201,7 @@ impl<W: Write> VM<W> {
                     let a = self.stack.pop();
                     let result = match (a, b) {
                         (Value::Number(a), Value::Number(b)) => Value::Number(a + b),
-                        (Value::Obj(a), Value::Obj(b)) => match (&*a, &*b) {
-                            (Object::String(a), Object::String(b)) => self.concatenate(a, b),
-                            _ => {
-                                return self
-                                    .runtime_error("Operands must be two numbers or two strings.");
-                            }
-                        },
+                        (Value::String(a), Value::String(b)) => self.concatenate(a, b),
                         _ => {
                             return self
                                 .runtime_error("Operands must be two numbers or two strings.");
@@ -248,10 +238,9 @@ impl<W: Write> VM<W> {
                 OpCode::Closure => {
                     let idx = self.read_byte();
                     let value = self.read_constant(idx);
-                    if let Value::Obj(obj_ref) = value {
-                        let func = obj_ref.as_function().unwrap();
+                    if let Value::Function(func) = value {
                         let mut closure = ObjClosure::new(func);
-                        let upvalue_count = unsafe { func.as_ref().upvalue_count };
+                        let upvalue_count = func.upvalue_count;
                         for _ in 0..upvalue_count {
                             let is_local = self.read_byte() != 0;
                             let index = self.read_byte() as usize;
@@ -263,8 +252,8 @@ impl<W: Write> VM<W> {
 
                             closure.upvalues.push(uv);
                         }
-                        let closure_ref = self.heap.alloc(Object::Closure(closure));
-                        self.stack.push(Value::Obj(closure_ref));
+                        let closure_ref = self.heap.allocate(closure);
+                        self.stack.push(Value::Closure(closure_ref));
                     }
                 }
                 OpCode::CloseUpvalue => {
@@ -296,11 +285,13 @@ impl<W: Write> VM<W> {
                 }
                 OpCode::SetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    self.current_frame().get_closure().upvalues[slot].set(self.stack.peek(0));
+                    let upvalue = self.current_frame().get_closure().upvalues[slot];
+                    let value = self.stack.peek(0);
+                    upvalue.set(value, &mut self.stack);
                 }
                 OpCode::GetUpvalue => {
                     let slot = self.read_byte() as usize;
-                    let value = self.current_frame().get_closure().upvalues[slot].get();
+                    let value = self.current_frame().get_closure().upvalues[slot].get(&self.stack);
                     self.stack.push(value);
                 }
                 OpCode::DefineGlobal => {
@@ -385,8 +376,8 @@ impl<W: Write> VM<W> {
         }
     }
 
-    fn call(&mut self, closure: &ObjClosure, arg_count: usize) -> VMResult {
-        let arity = unsafe { closure.function.as_ref().arity as usize };
+    fn call(&mut self, closure: Gc<ObjClosure>, arg_count: usize) -> VMResult {
+        let arity = closure.function.arity as usize;
         if arg_count != arity {
             return self.runtime_error(format!(
                 "Expected {} argument(s) but got {}.",
@@ -396,7 +387,7 @@ impl<W: Write> VM<W> {
 
         self.stack.print();
         self.frames.push(CallFrame {
-            closure: NonNull::from_ref(closure),
+            closure,
             ip: 0,
             slot_offset: self.stack.len() - arg_count - 1,
         });
@@ -405,20 +396,17 @@ impl<W: Write> VM<W> {
 
     fn call_value(&mut self, callee: Value, arg_count: usize) -> VMResult {
         match callee {
-            Value::Obj(obj_ref) => match &*obj_ref {
-                Object::Closure(c) => self.call(c, arg_count),
-                _ => self.runtime_error("Can only call functions and classes."),
-            },
+            Value::Closure(c) => self.call(c, arg_count),
             _ => self.runtime_error("Can only call functions and classes."),
         }
     }
 
-    fn capture_upvalue(&mut self, slot: usize) -> Upvalue {
-        if let Some(existing) = self.open_upvalues.get(&slot) {
-            return existing.clone();
+    fn capture_upvalue(&mut self, slot: usize) -> Gc<Upvalue> {
+        if let Some(&existing) = self.open_upvalues.get(&slot) {
+            return existing;
         }
-        let upvalue = Rc::new(Cell::new(self.stack[slot]));
-        self.open_upvalues.insert(slot, upvalue.clone());
+        let upvalue = self.heap.allocate(Upvalue::open_upvalue(slot));
+        self.open_upvalues.insert(slot, upvalue);
         upvalue
     }
 
@@ -431,15 +419,16 @@ impl<W: Write> VM<W> {
             .collect::<Vec<usize>>();
         for slot in slots_to_close {
             if let Some(upvalue) = self.open_upvalues.remove(&slot) {
-                upvalue.set(self.stack[slot]);
+                upvalue.close(&mut self.stack);
             }
         }
     }
 
-    fn concatenate(&mut self, a: *const ObjString, b: *const ObjString) -> Value {
-        let conc = unsafe { format!("{}{}", (*a).str, (*b).str) };
-        let str = self.heap.alloc_string(&conc);
-        Value::Obj(str)
+    fn concatenate(&mut self, a: Gc<ObjString>, b: Gc<ObjString>) -> Value {
+        let conc = format!("{}{}", (*a).str, (*b).str);
+        let str = ObjString { str: conc };
+        let str_ref = self.heap.allocate(str);
+        Value::String(str_ref)
     }
 
     fn runtime_error(&mut self, message: impl Into<String>) -> VMResult {
@@ -451,9 +440,7 @@ impl<W: Write> VM<W> {
             let ip = frame.ip - 1;
             let line = function.chunk.get_line(ip);
             match &function.name {
-                Some(name) => error.push_str(&format!("[line {}] in {}\n", line, unsafe {
-                    name.as_ref()
-                })),
+                Some(name) => error.push_str(&format!("[line {}] in {}\n", line, name)),
                 None => error.push_str(&format!("[line {}] in script.\n", line)),
             }
         }

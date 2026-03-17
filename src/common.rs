@@ -1,7 +1,9 @@
 use core::fmt;
 use std::ops::Neg;
 
-use crate::object::ObjRef;
+use rlox_gc::{Gc, Trace};
+
+use crate::object::{ObjClosure, ObjFunction, ObjString};
 
 macro_rules! define_instructions {
     (
@@ -93,13 +95,15 @@ impl From<OpCode> for u8 {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, Trace)]
 pub enum Value {
     #[default]
     Nil,
     Number(f64),
     Bool(bool),
-    Obj(ObjRef),
+    String(Gc<ObjString>),
+    Function(Gc<ObjFunction>),
+    Closure(Gc<ObjClosure>),
 }
 
 impl Value {
@@ -118,7 +122,9 @@ impl PartialEq for Value {
             (Value::Nil, Value::Nil) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::Obj(a), Value::Obj(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Function(a), Value::Function(b)) => a == b,
+            (Value::Closure(a), Value::Closure(b)) => a == b,
             _ => false,
         }
     }
@@ -130,7 +136,9 @@ impl fmt::Display for Value {
             Value::Nil => write!(f, "Nil"),
             Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
-            Value::Obj(obj) => write!(f, "{}", &**obj),
+            Value::String(x) => write!(f, "{}", x),
+            Value::Function(x) => write!(f, "{}", x),
+            Value::Closure(x) => write!(f, "{}", x),
         }
     }
 }

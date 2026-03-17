@@ -1,14 +1,13 @@
-use std::{
-    fmt::{Display, Formatter},
-    ptr::NonNull,
-};
+use std::fmt::{Display, Formatter};
+
+use rlox_gc::Gc;
 
 use crate::{
     common::{OpCode, Value},
     compiler::scanner::{Scanner, Token, TokenType},
-    object::{ObjFunction, ObjString, ObjStringPtr, Object},
+    object::{ObjFunction, ObjString},
     vm::{
-        Chunk, Heap,
+        Chunk, LoxHeap,
         vm::{GlobalIndices, VMError},
     },
 };
@@ -99,7 +98,7 @@ struct FunctionContext<'src> {
 }
 
 impl<'src> FunctionContext<'src> {
-    pub fn new(name: Option<NonNull<ObjString>>) -> Self {
+    pub fn new(name: Option<Gc<ObjString>>) -> Self {
         Self {
             function: ObjFunction::new(name),
             locals: Vec::with_capacity(u8::MAX as usize),
@@ -115,7 +114,7 @@ pub struct Compiler<'src> {
     scanner: Scanner<'src>,
     previous: Token<'src>,
     current: Token<'src>,
-    heap: &'src mut Heap,
+    heap: &'src mut LoxHeap,
     global_indices: &'src mut GlobalIndices,
     errors: Vec<CompileError>,
     can_assign: bool,
@@ -126,7 +125,7 @@ pub struct Compiler<'src> {
 impl<'src> Compiler<'src> {
     pub fn compile(
         source: &'src str,
-        heap: &mut Heap,
+        heap: &mut LoxHeap,
         global_indices: &mut GlobalIndices,
     ) -> Result<ObjFunction, VMError> {
         let mut compiler = Compiler {
@@ -207,8 +206,7 @@ impl<'src> Compiler<'src> {
         {
             if !self.had_error {
                 if let Some(name) = self.current_context().function.name {
-                    self.current_chunk_mut()
-                        .disassemble(unsafe { name.as_ref() });
+                    self.current_chunk_mut().disassemble(&name);
                 } else {
                     self.current_chunk_mut().disassemble("script");
                 }
@@ -218,12 +216,8 @@ impl<'src> Compiler<'src> {
     }
 
     fn begin_function(&mut self) {
-        let name = self.heap.alloc_string(self.previous.lexeme);
-        let name_ptr = match &*name {
-            Object::String(s) => Some(NonNull::from(s)),
-            _ => unreachable!(),
-        };
-        self.contexts.push(FunctionContext::new(name_ptr));
+        let name = self.heap.intern(self.previous.lexeme);
+        self.contexts.push(FunctionContext::new(Some(name)));
         // reserve slot 0 for function itself
         self.current_context_mut().locals.push(Local {
             token: Token::default(),
@@ -394,13 +388,12 @@ impl<'src> Compiler<'src> {
     }
 
     fn global_slot(&mut self, name: &str) -> u8 {
-        let obj_ref = self.heap.alloc_string(name);
-        let obj_string = ObjStringPtr::from(obj_ref);
-        if let Some(slot) = self.global_indices.get(&obj_string) {
+        let str_ref = self.heap.intern(name);
+        if let Some(slot) = self.global_indices.get(&str_ref) {
             return *slot;
         }
         let slot = self.global_indices.len() as u8;
-        self.global_indices.insert(obj_string, slot);
+        self.global_indices.insert(str_ref, slot);
         slot
     }
 
@@ -837,8 +830,8 @@ impl<'src> Compiler<'src> {
         let function_context = self.end_function();
         let func = function_context.function;
         let upvalues = function_context.upvalues;
-        let func_ref = self.heap.alloc(Object::Function(func));
-        let idx = self.make_constant(Value::Obj(func_ref));
+        let func_ref = self.heap.allocate(func);
+        let idx = self.make_constant(Value::Function(func_ref));
         self.emit_bytes(OpCode::Closure, idx);
 
         for uv in &upvalues {
@@ -850,8 +843,8 @@ impl<'src> Compiler<'src> {
     fn string(&mut self) {
         let lex = self.previous.lexeme;
         let str = &lex[1..lex.len() - 1];
-        let obj = self.heap.alloc_string(str);
-        self.emit_const(Value::Obj(obj));
+        let str_ref = self.heap.intern(str);
+        self.emit_const(Value::String(str_ref));
     }
 
     fn parse_precedence(&mut self, precedence: Precedence) {
