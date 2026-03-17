@@ -57,4 +57,16 @@ impl LoxHeap {
         self.interned_strings.insert(InternedString(gc));
         gc
     }
+
+    pub fn should_collect(&self) -> bool {
+        self.heap.should_collect()
+    }
+
+    pub fn collect(&mut self, roots: &dyn Trace) {
+        self.heap.mark(roots);
+        // don't leave dangling Gc's in interned strings
+        self.interned_strings.retain(|s| s.0.is_marked());
+        self.heap.sweep();
+        self.heap.update_threshold();
+    }
 }

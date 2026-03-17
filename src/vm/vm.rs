@@ -104,6 +104,12 @@ where
 #[derive(Debug, Default)]
 pub struct GlobalIndices(HashMap<Gc<ObjString>, u8>);
 
+impl GlobalIndices {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+}
+
 impl Deref for GlobalIndices {
     type Target = HashMap<Gc<ObjString>, u8>;
 
@@ -140,7 +146,6 @@ pub struct VM<W: Write> {
     stack: Stack<Value, 256>,
     heap: LoxHeap,
     globals: Vec<Option<Value>>,
-    global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
     open_upvalues: HashMap<usize, Gc<Upvalue>>,
     output: W,
@@ -152,7 +157,6 @@ impl<W: Write> VM<W> {
             stack: Stack::new(),
             heap: LoxHeap::new(),
             globals: Vec::new(),
-            global_indices: GlobalIndices::default(),
             frames: Vec::with_capacity(64),
             open_upvalues: HashMap::new(),
             output,
@@ -162,11 +166,11 @@ impl<W: Write> VM<W> {
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
-        let function = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
-        let func_ref = self.heap.allocate(function);
+        let function = Compiler::compile(source, &mut self.heap)?;
+        let func_ref = self.allocate(function);
 
         let closure = ObjClosure::new(func_ref);
-        let closure_ref = self.heap.allocate(closure);
+        let closure_ref = self.allocate(closure);
 
         self.stack.push(Value::Closure(closure_ref));
 
@@ -252,7 +256,7 @@ impl<W: Write> VM<W> {
 
                             closure.upvalues.push(uv);
                         }
-                        let closure_ref = self.heap.allocate(closure);
+                        let closure_ref = self.allocate(closure);
                         self.stack.push(Value::Closure(closure_ref));
                     }
                 }
@@ -405,7 +409,7 @@ impl<W: Write> VM<W> {
         if let Some(&existing) = self.open_upvalues.get(&slot) {
             return existing;
         }
-        let upvalue = self.heap.allocate(Upvalue::open_upvalue(slot));
+        let upvalue = self.allocate(Upvalue::open_upvalue(slot));
         self.open_upvalues.insert(slot, upvalue);
         upvalue
     }
@@ -427,7 +431,7 @@ impl<W: Write> VM<W> {
     fn concatenate(&mut self, a: Gc<ObjString>, b: Gc<ObjString>) -> Value {
         let conc = format!("{}{}", (*a).str, (*b).str);
         let str = ObjString { str: conc };
-        let str_ref = self.heap.allocate(str);
+        let str_ref = self.intern(&str);
         Value::String(str_ref)
     }
 
@@ -459,6 +463,50 @@ impl<W: Write> VM<W> {
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
+    }
+
+    fn allocate<T: Trace>(&mut self, value: T) -> Gc<T> {
+        if self.heap.should_collect() {
+            let roots = Roots(
+                &self.stack,
+                &self.frames,
+                &self.open_upvalues,
+                &self.globals,
+            );
+            self.heap.collect(&roots);
+        }
+        self.heap.allocate(value)
+    }
+
+    fn intern(&mut self, s: &str) -> Gc<ObjString> {
+        if self.heap.should_collect() {
+            let roots = Roots(
+                &self.stack,
+                &self.frames,
+                &self.open_upvalues,
+                &self.globals,
+            );
+            self.heap.collect(&roots);
+        }
+
+        self.heap.intern(s)
+    }
+}
+
+#[derive(Trace)]
+struct Roots<'a>(
+    &'a Stack<Value, 256>,
+    &'a Vec<CallFrame>,
+    &'a HashMap<usize, Gc<Upvalue>>,
+    &'a Vec<Option<Value>>,
+);
+
+impl<W: Write> Trace for VM<W> {
+    fn trace(&self) {
+        self.stack.trace();
+        self.frames.trace();
+        self.open_upvalues.trace();
+        self.globals.trace();
     }
 }
 

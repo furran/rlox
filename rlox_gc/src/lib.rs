@@ -63,6 +63,11 @@ impl<T> Gc<T> {
         header.set_marked(true);
         unsafe { (header.trace)(self.ptr.cast::<GcHeader>()) };
     }
+
+    pub fn is_marked(&self) -> bool {
+        let header = unsafe { self.ptr.cast::<GcHeader>().as_ref() };
+        header.is_marked()
+    }
 }
 
 struct GcHeader {
@@ -168,7 +173,7 @@ impl<T: Trace> Trace for Option<T> {
 pub struct Heap {
     head: Option<NonNull<GcHeader>>,
     bytes_alloc: usize,
-    threshold: usize,
+    pub threshold: usize,
 }
 
 impl Heap {
@@ -200,11 +205,11 @@ impl Heap {
         Gc { ptr: obj_ptr }
     }
 
-    fn mark(&self, roots: &dyn Trace) {
+    pub fn mark(&self, roots: &dyn Trace) {
         roots.trace();
     }
 
-    fn sweep(&mut self) {
+    pub fn sweep(&mut self) {
         let mut cursor = &mut self.head;
 
         while let Some(ptr) = *cursor {
@@ -225,9 +230,7 @@ impl Heap {
         self.bytes_alloc > self.threshold
     }
 
-    pub fn collect(&mut self, roots: &dyn Trace) {
-        self.mark(roots);
-        self.sweep();
+    pub fn update_threshold(&mut self) {
         self.threshold = self.bytes_alloc * 2;
     }
 }
