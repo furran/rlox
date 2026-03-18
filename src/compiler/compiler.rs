@@ -689,7 +689,9 @@ impl<'src> Compiler<'src> {
     }
 
     fn declaration(&mut self) {
-        if self.matches(TokenType::Fun) {
+        if self.matches(TokenType::Class) {
+            self.class_declaration();
+        } else if self.matches(TokenType::Fun) {
             self.function_declaration();
         } else if self.matches(TokenType::Var) {
             self.var_declaration();
@@ -782,6 +784,19 @@ impl<'src> Compiler<'src> {
         self.emit_bytes(OpCode::Call, arg_count);
     }
 
+    fn dot(&mut self) {
+        self.consume(TokenType::Identifier, "Expected property name after '.'.");
+        let name = self.heap.intern(&self.previous.lexeme);
+        let name_index = self.make_constant(Value::String(name));
+
+        if self.can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SetProperty, name_index);
+        } else {
+            self.emit_bytes(OpCode::GetProperty, name_index);
+        }
+    }
+
     fn variable(&mut self) {
         let name = self.previous.lexeme;
 
@@ -834,6 +849,16 @@ impl<'src> Compiler<'src> {
             self.emit_byte(uv.is_local as u8);
             self.emit_byte(uv.index);
         }
+    }
+
+    fn class_declaration(&mut self) {
+        let global_idx = self.parse_variable("Expected class name.");
+        let name = self.heap.intern(&self.previous.lexeme);
+        let name_const = self.make_constant(Value::String(name));
+        self.emit_bytes(OpCode::Class, name_const);
+        self.define_variable(global_idx);
+        self.consume(TokenType::LeftBrace, "Expected '{' before class body.");
+        self.consume(TokenType::RightBrace, "Expected '}' after class body.");
     }
 
     fn string(&mut self) {
@@ -964,6 +989,11 @@ impl<'src> Compiler<'src> {
                 prefix: None,
                 infix: Some(Compiler::or),
                 precedence: Precedence::Or,
+            },
+            TokenType::Dot => ParseRule {
+                prefix: None,
+                infix: Some(Compiler::dot),
+                precedence: Precedence::Call,
             },
             _ => ParseRule {
                 prefix: None,

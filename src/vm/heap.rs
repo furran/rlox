@@ -37,6 +37,10 @@ pub struct LoxHeap {
     interned_strings: HashSet<InternedString>,
 }
 
+impl Trace for LoxHeap {
+    fn trace(&self) {}
+}
+
 impl LoxHeap {
     pub fn new() -> Self {
         Self {

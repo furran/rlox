@@ -457,3 +457,16 @@ fn test_nested_closures() {
     "#);
     assert_eq!(output.trim(), "3");
 }
+
+#[test]
+fn test_class_add_and_set_fields() {
+    let output = run(r#"
+        class Pair {}
+        var pair = Pair();
+        pair.first = 1;
+        pair.second = 2;
+        print pair.first + pair.second;
+    "#);
+
+    assert_eq!(output.trim(), "3");
+}

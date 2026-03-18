@@ -1,5 +1,10 @@
 use core::fmt;
-use std::{borrow::Borrow, cell::Cell, hash::Hash, ops::Deref};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    fmt::Display,
+    ops::Deref,
+};
 
 use rlox_gc::{Gc, Trace};
 
@@ -34,34 +39,12 @@ impl PartialEq for ObjString {
 
 impl Eq for ObjString {}
 
-impl Hash for ObjString {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.str.hash(state);
-    }
-}
-
-impl Borrow<str> for Box<ObjString> {
-    fn borrow(&self) -> &str {
-        &self.str
-    }
-}
 #[derive(Debug, Trace)]
 pub struct ObjFunction {
     pub chunk: Chunk,
     pub name: Option<Gc<ObjString>>,
     pub arity: u8,
     pub upvalue_count: u8,
-}
-
-impl Default for ObjFunction {
-    fn default() -> Self {
-        Self {
-            chunk: Chunk::new(),
-            name: Default::default(),
-            arity: Default::default(),
-            upvalue_count: 0,
-        }
-    }
 }
 
 impl ObjFunction {
@@ -105,6 +88,38 @@ impl fmt::Display for ObjClosure {
             Some(name) => write!(f, "<fn {}>", name),
             None => write!(f, "<script>"),
         }
+    }
+}
+
+#[derive(Debug, Trace)]
+pub struct ObjClass {
+    pub name: Gc<ObjString>,
+}
+
+impl ObjClass {
+    pub fn new(name: Gc<ObjString>) -> Self {
+        Self { name }
+    }
+}
+
+#[derive(Debug, Trace)]
+pub struct ObjInstance {
+    pub class: Gc<ObjClass>,
+    pub fields: RefCell<HashMap<Gc<ObjString>, Value>>,
+}
+
+impl ObjInstance {
+    pub fn new(class: Gc<ObjClass>) -> Self {
+        Self {
+            class,
+            fields: RefCell::new(HashMap::new()),
+        }
+    }
+}
+
+impl Display for ObjInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{} instance>", self.class.name)
     }
 }
 

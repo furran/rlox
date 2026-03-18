@@ -1,5 +1,5 @@
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     fmt::{self, Display},
     hash::{Hash, Hasher},
@@ -158,6 +158,13 @@ impl<T: Trace> Trace for HashSet<T> {
         }
     }
 }
+
+impl<T: Trace> Trace for RefCell<T> {
+    fn trace(&self) {
+        self.borrow().trace();
+    }
+}
+
 impl<T: Trace, const N: usize> Trace for [T; N] {
     fn trace(&self) {
         for v in self {

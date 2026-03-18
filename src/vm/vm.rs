@@ -11,7 +11,7 @@ use rlox_gc::{Gc, Trace};
 use crate::{
     common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    object::{ObjClosure, ObjFunction, ObjString, Upvalue},
+    object::{ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString, Upvalue},
     vm::heap::LoxHeap,
 };
 
@@ -116,7 +116,7 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct GlobalIndices(HashMap<Gc<ObjString>, u8>);
+pub struct GlobalIndices(pub HashMap<Gc<ObjString>, u8>);
 
 impl GlobalIndices {
     pub fn new() -> Self {
@@ -295,6 +295,50 @@ impl<W: Write> VM<W> {
                     self.stack.truncate(slot_offset);
                     self.stack.push(result);
                 }
+                OpCode::Class => {
+                    let idx = self.read_byte();
+                    let val = self.read_constant(idx);
+
+                    if let Value::String(name) = val {
+                        let class = self.allocate(ObjClass::new(name));
+                        self.stack.push(Value::Class(class));
+                    } else {
+                        return self.runtime_error("Something went very wrong!");
+                    }
+                }
+                OpCode::SetProperty => {
+                    let val = self.stack.peek(1);
+                    if let Value::Instance(inst) = val {
+                        self.stack.print();
+                        let idx = self.read_byte();
+                        let val = self.read_constant(idx);
+                        if let Value::String(name) = val {
+                            let arg = self.stack.pop();
+                            inst.fields.borrow_mut().insert(name, arg);
+                            self.stack.pop();
+                            self.stack.push(arg);
+                        }
+                    } else {
+                        return self.runtime_error("Only instances have fields.");
+                    }
+                }
+                OpCode::GetProperty => {
+                    if let Value::Instance(instance) = self.stack.peek(0) {
+                        let idx = self.read_byte();
+                        let val = self.read_constant(idx);
+                        if let Value::String(name) = val {
+                            if let Some(&field) = instance.fields.borrow().get(&name) {
+                                self.stack.pop();
+                                self.stack.push(field);
+                            } else {
+                                return self
+                                    .runtime_error(format!("Undefined property '{}'.", name));
+                            }
+                        }
+                    } else {
+                        return self.runtime_error("Only instances have properties.");
+                    }
+                }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
                     let slot_offset = self.current_frame().slot_offset;
@@ -407,7 +451,6 @@ impl<W: Write> VM<W> {
             ));
         }
 
-        self.stack.print();
         self.frames.push(CallFrame {
             closure,
             ip: 0,
@@ -419,6 +462,13 @@ impl<W: Write> VM<W> {
     fn call_value(&mut self, callee: Value, arg_count: usize) -> VMResult {
         match callee {
             Value::Closure(c) => self.call(c, arg_count),
+            Value::Class(class) => {
+                let obj_instance = ObjInstance::new(class);
+                let instance = Value::Instance(self.allocate(obj_instance));
+                let top = self.stack.top;
+                self.stack[top - arg_count - 1] = instance;
+                Ok(())
+            }
             _ => self.runtime_error("Can only call functions and classes."),
         }
     }

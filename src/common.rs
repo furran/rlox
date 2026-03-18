@@ -3,7 +3,7 @@ use std::ops::Neg;
 
 use rlox_gc::{Gc, Trace};
 
-use crate::object::{ObjClosure, ObjFunction, ObjString};
+use crate::object::{ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString};
 
 macro_rules! define_instructions {
     (
@@ -72,15 +72,19 @@ define_instructions! {
     CloseUpvalue,
     Return,
 
+    Class(name_index: u8),
+    SetProperty(prop_index: u8),
+    GetProperty(prop_index: u8),
+
     SetLocal(index: u8),
     GetLocal(index: u8),
-
-    SetUpvalue(index: u8),
-    GetUpvalue(index: u8),
 
     DefineGlobal(index: u8),
     SetGlobal(index: u8),
     GetGlobal(index: u8),
+
+    SetUpvalue(index: u8),
+    GetUpvalue(index: u8),
 
     JumpIfFalse(hi: u8, lo: u8),
     Jump(hi: u8, lo: u8),
@@ -104,6 +108,8 @@ pub enum Value {
     String(Gc<ObjString>),
     Function(Gc<ObjFunction>),
     Closure(Gc<ObjClosure>),
+    Class(Gc<ObjClass>),
+    Instance(Gc<ObjInstance>),
 }
 
 impl Value {
@@ -139,6 +145,8 @@ impl fmt::Display for Value {
             Value::String(x) => write!(f, "{}", x),
             Value::Function(x) => write!(f, "{}", x),
             Value::Closure(x) => write!(f, "{}", x),
+            Value::Class(x) => write!(f, "{}", x.name),
+            Value::Instance(x) => write!(f, "{}", x),
         }
     }
 }
