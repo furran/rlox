@@ -467,12 +467,14 @@ impl<W: Write> VM<W> {
             }
         }
 
-        self.reset_stack();
+        self.reset();
         Err(VMError::RuntimeError(error))
     }
 
-    fn reset_stack(&mut self) {
+    fn reset(&mut self) {
         self.stack.top = 0;
+        self.frames.clear();
+        self.open_upvalues.clear();
     }
 
     fn current_frame(&self) -> &CallFrame {
