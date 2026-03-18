@@ -288,7 +288,7 @@ mod test {
         heap.mark(&NoRoots);
         heap.sweep();
 
-        assert_eq!(heap.get_bytes_alloc(), 0);
+        assert_eq!(heap.bytes_alloc, 0);
     }
 
     #[test]
@@ -298,7 +298,117 @@ mod test {
         heap.mark(&[gc]);
 
         heap.sweep();
-        assert!(heap.get_bytes_alloc() > 0);
+        assert!(heap.bytes_alloc > 0);
         assert_eq!(gc.value, 42.0);
+    }
+
+    #[derive(Trace)]
+    struct Node {
+        next: Option<Gc<Node>>,
+        value: f64,
+    }
+
+    #[test]
+    fn test_gc_traces_object_graph() {
+        let mut heap = Heap::new();
+        let leaf = heap.allocate(Node {
+            next: None,
+            value: 2.0,
+        });
+        let root = heap.allocate(Node {
+            next: Some(leaf),
+            value: 1.0,
+        });
+
+        heap.mark(&root);
+        assert_eq!(heap.bytes_alloc, size_of::<GcObject<Node>>() * 2);
+        assert_eq!(root.value, 1.0);
+        assert_eq!(root.next.unwrap().value, 2.0);
+    }
+
+    #[test]
+    fn test_gc_collects_cycles() {
+        let mut heap = Heap::new();
+        let a = heap.allocate(Node {
+            next: None,
+            value: 1.0,
+        });
+        let b = heap.allocate(Node {
+            next: Some(a),
+            value: 2.0,
+        });
+
+        // make a cyclical reference
+        unsafe {
+            (*a.ptr.as_ptr()).value.next = Some(b);
+        }
+
+        heap.mark(&NoRoots);
+        heap.sweep();
+
+        assert_eq!(heap.bytes_alloc, 0);
+    }
+
+    #[test]
+    fn test_gc_collects_cycles_rooted() {
+        let mut heap = Heap::new();
+        let a = heap.allocate(Node {
+            next: None,
+            value: 1.0,
+        });
+        let b = heap.allocate(Node {
+            next: Some(a),
+            value: 2.0,
+        });
+
+        // make a cyclical reference
+        unsafe {
+            (*a.ptr.as_ptr()).value.next = Some(b);
+        }
+
+        // root one of them
+        heap.mark(&a);
+        heap.sweep();
+
+        assert_eq!(heap.bytes_alloc, size_of::<GcObject<Node>>() * 2);
+    }
+
+    #[derive(Trace)]
+    struct Inner {
+        value: Gc<Node>,
+    }
+
+    #[derive(Trace)]
+    struct Outer {
+        inner: Inner,
+        direct: Gc<Node>,
+    }
+
+    #[test]
+    fn test_gc_traces_nested_struct() {
+        let mut heap = Heap::new();
+        let node1 = heap.allocate(Node {
+            next: None,
+            value: 1.0,
+        });
+        let node2 = heap.allocate(Node {
+            next: None,
+            value: 2.0,
+        });
+
+        let outer = heap.allocate(Outer {
+            inner: Inner { value: node1 },
+            direct: node2,
+        });
+
+        heap.mark(&outer);
+        heap.sweep();
+
+        assert_eq!(
+            heap.bytes_alloc,
+            size_of::<GcObject<Outer>>() + size_of::<GcObject<Node>>() * 2
+        );
+        assert_eq!(outer.inner.value.value, 1.0);
+        assert_eq!(outer.direct.value, 2.0);
     }
 }
