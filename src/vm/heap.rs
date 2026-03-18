@@ -45,7 +45,11 @@ impl LoxHeap {
         }
     }
 
-    pub fn allocate<T: Trace>(&mut self, value: T) -> Gc<T> {
+    pub fn get_bytes_alloc(&self) -> usize {
+        self.heap.get_bytes_alloc()
+    }
+
+    pub fn alloc_raw<T: Trace>(&mut self, value: T) -> Gc<T> {
         self.heap.allocate(value)
     }
 
@@ -68,5 +72,9 @@ impl LoxHeap {
         self.interned_strings.retain(|s| s.0.is_marked());
         self.heap.sweep();
         self.heap.update_threshold();
+    }
+
+    pub fn clear_interner(&mut self) {
+        self.interned_strings.clear();
     }
 }

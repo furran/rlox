@@ -5,3 +5,13 @@ edition = "2024"
 
 [dependencies]
 rlox_gc = { path = "rlox_gc" }
+
+[features]
+gc_stress = ["rlox_gc/gc_stress"]
+gc_log = ["rlox_gc/gc_log"]
+
+[workspace]
+members = [
+    ".",
+    "rlox_gc",
+]

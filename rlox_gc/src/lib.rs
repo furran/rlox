@@ -8,6 +8,7 @@ use std::{
 };
 
 pub use rlox_gc_derive::Trace;
+pub extern crate self as rlox_gc;
 
 #[derive(Debug)]
 pub struct Gc<T> {
@@ -70,11 +71,15 @@ impl<T> Gc<T> {
     }
 }
 
+#[repr(C)]
 struct GcHeader {
     next: Option<NonNull<GcHeader>>,
     marked: Cell<bool>,
+    size: usize,
     trace: unsafe fn(NonNull<GcHeader>),
     drop: unsafe fn(NonNull<GcHeader>),
+    #[cfg(feature = "gc_log")]
+    pub type_name: &'static str,
 }
 
 impl GcHeader {
@@ -99,7 +104,7 @@ pub trait Trace {
 
 impl<T: Trace> Trace for Gc<T> {
     fn trace(&self) {
-        unsafe { self.ptr.as_ref().trace() };
+        self.mark();
     }
 }
 
@@ -185,20 +190,28 @@ impl Heap {
         }
     }
 
+    pub fn get_bytes_alloc(&self) -> usize {
+        self.bytes_alloc
+    }
+
     pub fn allocate<T: Trace>(&mut self, value: T) -> Gc<T> {
         self.bytes_alloc += std::mem::size_of::<GcObject<T>>();
 
-        let mut obj = Box::new(GcObject {
+        let obj = Box::new(GcObject {
             header: GcHeader {
                 next: self.head,
                 marked: Cell::new(false),
+                size: std::mem::size_of::<GcObject<T>>(),
                 trace: trace_fn::<T>,
                 drop: drop_fn::<T>,
+                #[cfg(feature = "gc_log")]
+                type_name: std::any::type_name::<T>(),
             },
             value,
         });
-        let header_ptr: NonNull<GcHeader> = NonNull::from(&mut obj.header);
+
         let obj_ptr: NonNull<GcObject<T>> = NonNull::from(Box::leak(obj));
+        let header_ptr: NonNull<GcHeader> = obj_ptr.cast::<GcHeader>();
 
         self.head = Some(header_ptr);
 
@@ -210,23 +223,32 @@ impl Heap {
     }
 
     pub fn sweep(&mut self) {
-        let mut cursor = &mut self.head;
+        let mut cursor: *mut Option<NonNull<GcHeader>> = &mut self.head;
 
-        while let Some(ptr) = *cursor {
-            let header = unsafe { &*ptr.as_ptr() };
-
-            if header.marked.get() {
-                header.marked.set(false);
-                cursor = unsafe { &mut (*ptr.as_ptr()).next };
+        while let Some(ptr) = unsafe { *cursor } {
+            let marked = unsafe { (*ptr.as_ptr()).marked.get() };
+            if marked {
+                #[cfg(feature = "gc_log")]
+                println!("GC: skipping {}", unsafe { (*ptr.as_ptr()).type_name },);
+                unsafe { (*ptr.as_ptr()).marked.set(false) };
+                cursor = unsafe { &raw mut (*ptr.as_ptr()).next };
             } else {
-                *cursor = header.next;
-                self.bytes_alloc -= unsafe { size_of_val(&*ptr.as_ptr()) };
-                unsafe { (header.drop)(ptr) };
+                #[cfg(feature = "gc_log")]
+                println!("GC: sweeping {}", unsafe { (*ptr.as_ptr()).type_name },);
+                let next = unsafe { (*ptr.as_ptr()).next };
+                let size = unsafe { (*ptr.as_ptr()).size };
+                unsafe { *cursor = next };
+                self.bytes_alloc -= size;
+                unsafe { ((*ptr.as_ptr()).drop)(ptr) };
             }
         }
     }
 
     pub fn should_collect(&self) -> bool {
+        #[cfg(feature = "gc_stress")]
+        {
+            return true;
+        }
         self.bytes_alloc > self.threshold
     }
 
@@ -242,4 +264,41 @@ unsafe fn trace_fn<T: Trace>(ptr: NonNull<GcHeader>) {
 
 unsafe fn drop_fn<T>(ptr: NonNull<GcHeader>) {
     drop(unsafe { Box::from_raw(ptr.cast::<GcObject<T>>().as_ptr()) });
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    struct NoRoots;
+    impl Trace for NoRoots {
+        fn trace(&self) {}
+    }
+
+    #[derive(Trace)]
+    struct TestObj {
+        value: f64,
+    }
+
+    #[test]
+    fn test_gc_collects_unreachable() {
+        let mut heap = Heap::new();
+        let _gc = heap.allocate(TestObj { value: 42.0 });
+
+        heap.mark(&NoRoots);
+        heap.sweep();
+
+        assert_eq!(heap.get_bytes_alloc(), 0);
+    }
+
+    #[test]
+    fn test_gc_keeps_reachable() {
+        let mut heap = Heap::new();
+        let gc = heap.allocate(TestObj { value: 42.0 });
+        heap.mark(&[gc]);
+
+        heap.sweep();
+        assert!(heap.get_bytes_alloc() > 0);
+        assert_eq!(gc.value, 42.0);
+    }
 }

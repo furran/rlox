@@ -23,10 +23,18 @@ pub enum VMError {
 
 pub type VMResult = Result<(), VMError>;
 
-#[derive(Debug, Trace)]
+#[derive(Debug)]
 pub struct Stack<T: Trace, const N: usize> {
     data: [T; N],
     top: usize,
+}
+
+impl<T: Trace, const N: usize> Trace for Stack<T, N> {
+    fn trace(&self) {
+        for item in &self.data[..self.top] {
+            item.trace();
+        }
+    }
 }
 
 impl<T: Trace, const N: usize> Deref for Stack<T, N> {
@@ -99,6 +107,12 @@ where
     fn print(&self) {
         println!("Stack [ {:?} ]", &self.data[0..self.top + 1])
     }
+
+    fn clear(&mut self) {
+        for v in &mut self.data {
+            *v = Default::default();
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -167,11 +181,10 @@ impl<W: Write> VM<W> {
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
         let function = Compiler::compile(source, &mut self.heap)?;
-        let func_ref = self.allocate(function);
-
+        // avoid collection
+        let func_ref = self.heap.alloc_raw(function);
         let closure = ObjClosure::new(func_ref);
-        let closure_ref = self.allocate(closure);
-
+        let closure_ref = self.heap.alloc_raw(closure);
         self.stack.push(Value::Closure(closure_ref));
 
         self.frames.push(CallFrame {
@@ -243,6 +256,9 @@ impl<W: Write> VM<W> {
                     let idx = self.read_byte();
                     let value = self.read_constant(idx);
                     if let Value::Function(func) = value {
+                        // capture_upvalue can call collect, so we need to root our Gc<ObjFunction> temporarily
+                        self.stack.push(Value::Function(func));
+
                         let mut closure = ObjClosure::new(func);
                         let upvalue_count = func.upvalue_count;
                         for _ in 0..upvalue_count {
@@ -257,6 +273,8 @@ impl<W: Write> VM<W> {
                             closure.upvalues.push(uv);
                         }
                         let closure_ref = self.allocate(closure);
+                        // unroot func
+                        self.stack.pop();
                         self.stack.push(Value::Closure(closure_ref));
                     }
                 }
@@ -475,7 +493,8 @@ impl<W: Write> VM<W> {
             );
             self.heap.collect(&roots);
         }
-        self.heap.allocate(value)
+        dbg!(std::any::type_name::<T>());
+        self.heap.alloc_raw(value)
     }
 
     fn intern(&mut self, s: &str) -> Gc<ObjString> {
@@ -490,6 +509,27 @@ impl<W: Write> VM<W> {
         }
 
         self.heap.intern(s)
+    }
+}
+
+impl<W: Write> Drop for VM<W> {
+    fn drop(&mut self) {
+        self.stack.clear();
+        self.frames.clear();
+        self.globals.clear();
+        self.open_upvalues.clear();
+        self.heap.clear_interner();
+
+        let roots = Roots(
+            &self.stack,
+            &self.frames,
+            &self.open_upvalues,
+            &self.globals,
+        );
+        self.heap.collect(&roots);
+
+        // sanity check
+        debug_assert_eq!(self.heap.get_bytes_alloc(), 0, "GC leak detected!");
     }
 }
 

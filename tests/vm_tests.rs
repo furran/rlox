@@ -4,6 +4,7 @@ fn run(source: &str) -> String {
     let mut output = Vec::new();
     let mut vm = VM::new(&mut output);
     vm.interpret(source).unwrap();
+    drop(vm);
     String::from_utf8(output).unwrap()
 }
 
@@ -13,6 +14,7 @@ fn run_repl(lines: &[&str]) -> String {
     for line in lines {
         vm.interpret(line).unwrap();
     }
+    drop(vm);
     String::from_utf8(output).unwrap()
 }
 

@@ -826,7 +826,7 @@ impl<'src> Compiler<'src> {
         let function_context = self.end_function();
         let func = function_context.function;
         let upvalues = function_context.upvalues;
-        let func_ref = self.heap.allocate(func);
+        let func_ref = self.heap.alloc_raw(func);
         let idx = self.make_constant(Value::Function(func_ref));
         self.emit_bytes(OpCode::Closure, idx);
 

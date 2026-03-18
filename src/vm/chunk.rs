@@ -4,21 +4,17 @@ use rlox_gc::Trace;
 
 use crate::common::{OpCode, Value};
 
-#[derive(Debug)]
+#[derive(Debug, Trace)]
 struct LineStart {
     offset: usize,
     line: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Trace)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
     line_starts: Vec<LineStart>,
-}
-
-impl Trace for Chunk {
-    fn trace(&self) {}
 }
 
 impl Chunk {
