@@ -115,7 +115,7 @@ pub struct Compiler<'src> {
     previous: Token<'src>,
     current: Token<'src>,
     heap: &'src mut LoxHeap,
-    global_indices: GlobalIndices,
+    global_indices: &'src mut GlobalIndices,
     errors: Vec<CompileError>,
     can_assign: bool,
     had_error: bool,
@@ -123,14 +123,18 @@ pub struct Compiler<'src> {
 }
 
 impl<'src> Compiler<'src> {
-    pub fn compile(source: &'src str, heap: &mut LoxHeap) -> Result<ObjFunction, VMError> {
+    pub fn compile(
+        source: &'src str,
+        heap: &mut LoxHeap,
+        global_indices: &mut GlobalIndices,
+    ) -> Result<ObjFunction, VMError> {
         let mut compiler = Compiler {
             contexts: vec![FunctionContext::new(None)],
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
             heap: heap,
-            global_indices: GlobalIndices::new(),
+            global_indices,
             errors: Vec::new(),
             can_assign: false,
             had_error: false,

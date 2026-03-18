@@ -470,3 +470,16 @@ fn test_class_add_and_set_fields() {
 
     assert_eq!(output.trim(), "3");
 }
+
+#[test]
+fn test_class_persistence_across_repl_lines() {
+    let output = run_repl(&[
+        "class Pair {}",
+        "var pair = Pair();",
+        "pair.first = 1;",
+        "pair.second = 2;",
+        "print pair.first + pair.second;",
+    ]);
+
+    assert_eq!(output.trim(), "3");
+}

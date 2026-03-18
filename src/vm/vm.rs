@@ -160,6 +160,7 @@ pub struct VM<W: Write> {
     stack: Stack<Value, 256>,
     heap: LoxHeap,
     globals: Vec<Option<Value>>,
+    global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
     open_upvalues: HashMap<usize, Gc<Upvalue>>,
     output: W,
@@ -171,6 +172,7 @@ impl<W: Write> VM<W> {
             stack: Stack::new(),
             heap: LoxHeap::new(),
             globals: Vec::new(),
+            global_indices: GlobalIndices::new(),
             frames: Vec::with_capacity(64),
             open_upvalues: HashMap::new(),
             output,
@@ -180,7 +182,7 @@ impl<W: Write> VM<W> {
     pub fn run_file(_source: &String) {}
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
-        let function = Compiler::compile(source, &mut self.heap)?;
+        let function = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
         // avoid collection
         let func_ref = self.heap.alloc_raw(function);
         let closure = ObjClosure::new(func_ref);
@@ -542,6 +544,7 @@ impl<W: Write> VM<W> {
                 &self.frames,
                 &self.open_upvalues,
                 &self.globals,
+                &self.global_indices,
             );
             self.heap.collect(&roots);
         }
@@ -556,6 +559,7 @@ impl<W: Write> VM<W> {
                 &self.frames,
                 &self.open_upvalues,
                 &self.globals,
+                &self.global_indices,
             );
             self.heap.collect(&roots);
         }
@@ -577,6 +581,7 @@ impl<W: Write> Drop for VM<W> {
             &self.frames,
             &self.open_upvalues,
             &self.globals,
+            &self.global_indices,
         );
         self.heap.collect(&roots);
 
@@ -591,6 +596,7 @@ struct Roots<'a>(
     &'a Vec<CallFrame>,
     &'a HashMap<usize, Gc<Upvalue>>,
     &'a Vec<Option<Value>>,
+    &'a GlobalIndices,
 );
 
 impl<W: Write> Trace for VM<W> {
@@ -599,6 +605,7 @@ impl<W: Write> Trace for VM<W> {
         self.frames.trace();
         self.open_upvalues.trace();
         self.globals.trace();
+        self.global_indices.trace();
     }
 }
 
