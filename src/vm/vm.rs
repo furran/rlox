@@ -311,7 +311,6 @@ impl<W: Write> VM<W> {
                 OpCode::SetProperty => {
                     let val = self.stack.peek(1);
                     if let Value::Instance(inst) = val {
-                        self.stack.print();
                         let idx = self.read_byte();
                         let val = self.read_constant(idx);
                         if let Value::String(name) = val {
@@ -573,6 +572,7 @@ impl<W: Write> Drop for VM<W> {
         self.stack.clear();
         self.frames.clear();
         self.globals.clear();
+        self.global_indices.clear();
         self.open_upvalues.clear();
         self.heap.clear_interner();
 
@@ -583,7 +583,7 @@ impl<W: Write> Drop for VM<W> {
             &self.globals,
             &self.global_indices,
         );
-        self.heap.collect(&roots);
+        self.heap.collect(&[roots]);
 
         // sanity check
         debug_assert_eq!(self.heap.get_bytes_alloc(), 0, "GC leak detected!");

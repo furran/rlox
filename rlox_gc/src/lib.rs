@@ -132,6 +132,9 @@ impl Trace for bool {
 impl Trace for u8 {
     fn trace(&self) {}
 }
+impl Trace for () {
+    fn trace(&self) {}
+}
 impl<T: Trace + Copy> Trace for Cell<T> {
     fn trace(&self) {
         self.get().trace();
@@ -144,9 +147,10 @@ impl<T: Trace> Trace for Vec<T> {
         }
     }
 }
-impl<K, V: Trace> Trace for HashMap<K, V> {
+impl<K: Trace, V: Trace> Trace for HashMap<K, V> {
     fn trace(&self) {
-        for v in self.values() {
+        for (k, v) in self.iter() {
+            k.trace();
             v.trace();
         }
     }
