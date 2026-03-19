@@ -483,3 +483,64 @@ fn test_class_persistence_across_repl_lines() {
 
     assert_eq!(output.trim(), "3");
 }
+
+#[test]
+fn test_locally_defined_class() {
+    let output = run(r#"
+        {
+            class Local {}
+            var local = Local();
+            local.hello = "hello";
+            print local.hello;
+        }
+    "#);
+
+    assert_eq!(output.trim(), "hello");
+}
+
+#[test]
+fn test_locally_defined_class_is_out_of_scope() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        {
+            class Local {}
+            var local = Local();
+            local.hello = "hello";
+            print local.hello;
+        }
+        var global = Local();
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_return_class_from_function() {
+    let output = run(r#"
+        fun test() {
+            class A {}
+            return A;
+        }
+        var x = test();
+        var y = x();
+        print y;
+    "#);
+
+    assert_eq!(output.trim(), "<A instance>");
+}
+
+#[test]
+fn test_set_property_of_non_instance() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        var x = "fish";
+        x.fish = 1;
+    "#,
+    );
+
+    assert!(result.is_err());
+}
