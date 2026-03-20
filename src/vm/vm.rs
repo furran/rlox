@@ -324,20 +324,47 @@ impl<W: Write> VM<W> {
                     }
                 }
                 OpCode::GetProperty => {
-                    if let Value::Instance(instance) = self.stack.peek(0) {
-                        let idx = self.read_byte();
-                        let val = self.read_constant(idx);
-                        if let Value::String(name) = val {
-                            if let Some(&field) = instance.fields.borrow().get(&name) {
-                                self.stack.pop();
-                                self.stack.push(field);
-                            } else {
-                                return self
-                                    .runtime_error(format!("Undefined property '{}'.", name));
-                            }
-                        }
-                    } else {
+                    let Value::Instance(instance) = self.stack.peek(0) else {
                         return self.runtime_error("Only instances have properties.");
+                    };
+                    let idx = self.read_byte();
+                    let Value::String(name) = self.read_constant(idx) else {
+                        unreachable!("Something was miscompiled.")
+                    };
+                    let field = instance
+                        .fields
+                        .borrow()
+                        .get(&name)
+                        .copied()
+                        .unwrap_or(Value::Nil);
+                    self.stack.pop();
+                    self.stack.push(field);
+                }
+                OpCode::SetIndex => {
+                    let value = self.stack.pop();
+                    let Value::String(name) = self.stack.pop() else {
+                        return self.runtime_error("Field name must be a string.");
+                    };
+                    let Value::Instance(instance) = self.stack.pop() else {
+                        return self.runtime_error("Only instances have fields.");
+                    };
+
+                    instance.fields.borrow_mut().insert(name, value);
+                    self.stack.push(value);
+                }
+                OpCode::GetIndex => {
+                    let name = self.stack.pop();
+                    let instance = self.stack.pop();
+                    if let (Value::String(name), Value::Instance(inst)) = (name, instance) {
+                        let value = inst
+                            .fields
+                            .borrow()
+                            .get(&name)
+                            .copied()
+                            .unwrap_or(Value::Nil);
+                        self.stack.push(value);
+                    } else {
+                        return self.runtime_error("Field name must be a string");
                     }
                 }
                 OpCode::SetLocal => {

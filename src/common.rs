@@ -76,6 +76,9 @@ define_instructions! {
     SetProperty(prop_index: u8),
     GetProperty(prop_index: u8),
 
+    SetIndex,
+    GetIndex,
+
     SetLocal(index: u8),
     GetLocal(index: u8),
 

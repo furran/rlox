@@ -801,6 +801,18 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    fn index(&mut self) {
+        let can_assign = self.can_assign;
+        self.expression();
+        self.consume(TokenType::RightBracket, "Expected ']' after index.");
+        if can_assign && self.matches(TokenType::Equal) {
+            self.expression();
+            self.emit_byte(OpCode::SetIndex);
+        } else {
+            self.emit_byte(OpCode::GetIndex);
+        }
+    }
+
     fn variable(&mut self) {
         let name = self.previous.lexeme;
 
@@ -997,6 +1009,11 @@ impl<'src> Compiler<'src> {
             TokenType::Dot => ParseRule {
                 prefix: None,
                 infix: Some(Compiler::dot),
+                precedence: Precedence::Call,
+            },
+            TokenType::LeftBracket => ParseRule {
+                prefix: None,
+                infix: Some(Compiler::index),
                 precedence: Precedence::Call,
             },
             _ => ParseRule {

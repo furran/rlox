@@ -1,4 +1,7 @@
-use rlox::vm::{VM, vm::VMError};
+use rlox::{
+    common::Value,
+    vm::{VM, vm::VMError},
+};
 
 fn run(source: &str) -> String {
     let mut output = Vec::new();
@@ -532,6 +535,17 @@ fn test_return_class_from_function() {
 }
 
 #[test]
+fn test_get_undefined_property() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        print x.fish;
+    "#);
+
+    assert_eq!(output.trim(), format!("{}", Value::Nil))
+}
+
+#[test]
 fn test_set_property_of_non_instance() {
     let output = Vec::new();
     let mut vm = VM::new(output);
@@ -542,5 +556,82 @@ fn test_set_property_of_non_instance() {
     "#,
     );
 
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dynamic_field_names_set_get_basic() {
+    let output = run(r#"
+        class A{}
+        var x = A();
+        x["a"] = 1;
+        print x["a"];
+        print x.a;
+    "#);
+
+    assert_eq!(output.trim(), "1\n1");
+}
+
+#[test]
+fn test_dynamic_field_names_dynamic_key() {
+    let output = run(r#"
+        class A{}
+        var x = A();
+        var hello = "hello";
+        var world = " world";
+        x[hello + world] = 1;
+        print x["hello world"];
+    "#);
+
+    assert_eq!(output.trim(), "1");
+}
+
+#[test]
+fn test_dynamic_field_names_dot_same_field() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        x.field = 1;
+        print x["field"];
+        x["field"] = 2;
+        print x.field;
+    "#);
+    assert_eq!(output.trim(), "1\n2");
+}
+
+#[test]
+fn test_dynamic_field_names_missing_field_returns_nil() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        print x["nonexistent"];
+    "#);
+    assert_eq!(output.trim(), format!("{}", Value::Nil));
+}
+
+#[test]
+fn test_dynamic_field_names_non_string_key_errors() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        class A {}
+        var x = A();
+        x[42] = 1;
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dynamic_field_names_non_instance_errors() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        var x = "not an instance";
+        x["field"] = 1;
+    "#,
+    );
     assert!(result.is_err());
 }
