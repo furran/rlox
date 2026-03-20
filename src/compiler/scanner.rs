@@ -50,6 +50,8 @@ pub enum TokenType {
     Super,
     This,
 
+    Delete,
+
     Dummy,
 }
 
@@ -200,7 +202,15 @@ impl<'src> Scanner<'src> {
                 Some(b'l') => self.check_keyword(2, b"ass", TokenType::Class),
                 _ => TokenType::Identifier,
             },
-            b'd' => self.check_keyword(1, b"efault", TokenType::Default),
+            b'd' => match self.bytes.get(self.start + 1) {
+                Some(b'e') => match self.bytes.get(self.start + 2) {
+                    Some(b'f') => self.check_keyword(3, b"ault", TokenType::Default),
+                    Some(b'l') => self.check_keyword(3, b"ete", TokenType::Delete),
+                    _ => TokenType::Identifier,
+                },
+
+                _ => TokenType::Identifier,
+            },
             b'e' => self.check_keyword(1, b"lse", TokenType::Else),
             b'f' => match self.bytes.get(self.start + 1) {
                 Some(b'a') => self.check_keyword(2, b"lse", TokenType::False),

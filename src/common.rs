@@ -75,6 +75,7 @@ define_instructions! {
     Class(name_index: u8),
     SetProperty(prop_index: u8),
     GetProperty(prop_index: u8),
+    DeleteProperty(index: u8),
 
     SetIndex,
     GetIndex,

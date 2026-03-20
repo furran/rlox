@@ -634,6 +634,25 @@ impl<'src> Compiler<'src> {
         self.end_scope();
     }
 
+    fn delete(&mut self) {
+        self.consume(TokenType::Identifier, "Expected identifier after delete.");
+        self.variable();
+        self.consume(TokenType::Dot, "Expected '.' after expression in delete.");
+        self.consume(TokenType::Identifier, "Expected field name after '.'.");
+
+        let name = self.previous.lexeme;
+        let name_ref = self.heap.intern(name);
+        let idx = self.make_constant(Value::String(name_ref));
+
+        self.emit_bytes(OpCode::DeleteProperty, idx);
+    }
+
+    fn delete_property_statement(&mut self) {
+        self.delete();
+        self.consume(TokenType::Semicolon, "Expected ';' after delete statement.");
+        self.emit_byte(OpCode::Pop);
+    }
+
     fn and(&mut self) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse);
         self.emit_byte(OpCode::Pop);
@@ -725,6 +744,8 @@ impl<'src> Compiler<'src> {
             self.while_statement();
         } else if self.matches(TokenType::For) {
             self.for_statement();
+        } else if self.matches(TokenType::Delete) {
+            self.delete_property_statement();
         } else {
             self.expression_statement();
         }
@@ -1015,6 +1036,11 @@ impl<'src> Compiler<'src> {
                 prefix: None,
                 infix: Some(Compiler::index),
                 precedence: Precedence::Call,
+            },
+            TokenType::Delete => ParseRule {
+                prefix: Some(Compiler::delete),
+                infix: None,
+                precedence: Precedence::None,
             },
             _ => ParseRule {
                 prefix: None,

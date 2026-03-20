@@ -324,7 +324,7 @@ impl<W: Write> VM<W> {
                     };
                     let idx = self.read_byte();
                     let Value::String(name) = self.read_constant(idx) else {
-                        unreachable!("Something was miscompiled.")
+                        unreachable!()
                     };
                     let field = instance
                         .fields
@@ -334,6 +334,21 @@ impl<W: Write> VM<W> {
                         .unwrap_or(Value::Nil);
                     self.stack.pop();
                     self.stack.push(field);
+                }
+                OpCode::DeleteProperty => {
+                    let idx = self.read_byte();
+                    let Value::String(name) = self.read_constant(idx) else {
+                        unreachable!()
+                    };
+                    let Value::Instance(instance) = self.stack.pop() else {
+                        return self.runtime_error("Can only delete fields on instances.");
+                    };
+                    let removed = instance
+                        .fields
+                        .borrow_mut()
+                        .remove(&name)
+                        .unwrap_or(Value::Nil);
+                    self.stack.push(removed);
                 }
                 OpCode::SetIndex => {
                     let value = self.stack.pop();
@@ -591,24 +606,15 @@ impl<W: Write> VM<W> {
 
 impl<W: Write> Drop for VM<W> {
     fn drop(&mut self) {
-        self.stack.clear();
-        self.frames.clear();
-        self.globals.clear();
-        self.global_indices.clear();
-        self.open_upvalues.clear();
-        self.heap.clear_interner();
-
-        let roots = Roots(
-            &self.stack,
-            &self.frames,
-            &self.open_upvalues,
-            &self.globals,
-            &self.global_indices,
-        );
-        self.heap.collect(&[roots]);
+        struct NoRoots;
+        impl Trace for NoRoots {
+            fn trace(&self) {}
+        }
+        self.heap.collect(&[NoRoots]);
 
         // sanity check
         debug_assert_eq!(self.heap.get_bytes_alloc(), 0, "GC leak detected!");
+        debug_assert!(self.stack.is_empty());
     }
 }
 

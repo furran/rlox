@@ -635,3 +635,51 @@ fn test_dynamic_field_names_non_instance_errors() {
     );
     assert!(result.is_err());
 }
+
+#[test]
+fn test_delete_field_basic() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        x.fish = "fish";
+        delete x.fish;
+        print x.fish;
+    "#);
+    assert_eq!(output.trim(), format!("{}", Value::Nil));
+}
+
+#[test]
+fn test_delete_undefined_field() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        delete x.fish;
+        print x.fish;
+    "#);
+    assert_eq!(output.trim(), format!("{}", Value::Nil));
+}
+
+#[test]
+fn test_delete_field_is_expression() {
+    let output = run(r#"
+        class A {}
+        var x = A();
+        x.fish = "fish";
+        var f = delete x.fish;
+        print f;
+    "#);
+    assert_eq!(output.trim(), "fish");
+}
+
+#[test]
+fn test_delete_field_from_non_instance_errors() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        var x = "fish";
+        delete x.fish;
+    "#,
+    );
+    assert!(result.is_err());
+}
