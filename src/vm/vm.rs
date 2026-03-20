@@ -258,9 +258,6 @@ impl<W: Write> VM<W> {
                     let idx = self.read_byte();
                     let value = self.read_constant(idx);
                     if let Value::Function(func) = value {
-                        // capture_upvalue can call collect, so we need to root our Gc<ObjFunction> temporarily
-                        self.stack.push(Value::Function(func));
-
                         let mut closure = ObjClosure::new(func);
                         let upvalue_count = func.upvalue_count;
                         for _ in 0..upvalue_count {
@@ -275,8 +272,6 @@ impl<W: Write> VM<W> {
                             closure.upvalues.push(uv);
                         }
                         let closure_ref = self.allocate(closure);
-                        // unroot func
-                        self.stack.pop();
                         self.stack.push(Value::Closure(closure_ref));
                     }
                 }
