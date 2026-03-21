@@ -207,8 +207,7 @@ impl<W: Write> VM<W> {
             let opcode = self.read_opcode();
             match opcode {
                 OpCode::Constant => {
-                    let idx = self.read_byte();
-                    let constant = self.read_constant(idx);
+                    let constant = self.read_constant();
                     self.stack.push(constant);
                 }
                 OpCode::Negate => {
@@ -259,34 +258,28 @@ impl<W: Write> VM<W> {
                     self.call_value(self.stack.peek(arg_count), arg_count)?;
                 }
                 OpCode::Invoke => {
-                    let idx = self.read_byte();
-                    let Value::String(name) = self.read_constant(idx) else {
-                        unreachable!()
-                    };
+                    let name = self.read_constant().unwrap_string();
                     let arg_count = self.read_byte() as usize;
 
                     self.invoke(name, arg_count)?;
                 }
                 OpCode::Closure => {
-                    let idx = self.read_byte();
-                    let value = self.read_constant(idx);
-                    if let Value::Function(func) = value {
-                        let mut closure = ObjClosure::new(func);
-                        let upvalue_count = func.upvalue_count;
-                        for _ in 0..upvalue_count {
-                            let is_local = self.read_byte() != 0;
-                            let index = self.read_byte() as usize;
-                            let uv = if is_local {
-                                self.capture_upvalue(self.current_frame().slot_offset + index)
-                            } else {
-                                self.current_frame().get_closure().upvalues[index].clone()
-                            };
+                    let func = self.read_constant().unwrap_function();
+                    let mut closure = ObjClosure::new(func);
+                    let upvalue_count = func.upvalue_count;
+                    for _ in 0..upvalue_count {
+                        let is_local = self.read_byte() != 0;
+                        let index = self.read_byte() as usize;
+                        let uv = if is_local {
+                            self.capture_upvalue(self.current_frame().slot_offset + index)
+                        } else {
+                            self.current_frame().get_closure().upvalues[index].clone()
+                        };
 
-                            closure.upvalues.push(uv);
-                        }
-                        let closure_ref = self.allocate(closure);
-                        self.stack.push(Value::Closure(closure_ref));
+                        closure.upvalues.push(uv);
                     }
+                    let closure_ref = self.allocate(closure);
+                    self.stack.push(Value::Closure(closure_ref));
                 }
                 OpCode::CloseUpvalue => {
                     self.close_upvalues(self.stack.top);
@@ -306,34 +299,20 @@ impl<W: Write> VM<W> {
                     self.stack.push(result);
                 }
                 OpCode::Class => {
-                    let idx = self.read_byte();
-                    let val = self.read_constant(idx);
-
-                    if let Value::String(name) = val {
-                        let class = self.allocate(ObjClass::new(name));
-                        self.stack.push(Value::Class(class));
-                    } else {
-                        unreachable!();
-                    }
+                    let name = self.read_constant().unwrap_string();
+                    let class = self.allocate(ObjClass::new(name));
+                    self.stack.push(Value::Class(class));
                 }
                 OpCode::Method => {
-                    let idx = self.read_byte();
-                    let Value::String(name) = self.read_constant(idx) else {
-                        unreachable!()
-                    };
-                    let Value::Closure(method) = self.stack.pop() else {
-                        unreachable!()
-                    };
-                    let Value::Class(class) = self.stack.peek(0) else {
-                        unreachable!()
-                    };
+                    let name = self.read_constant().unwrap_string();
+                    let method = self.stack.pop().unwrap_closure();
+                    let class = self.stack.peek(0).unwrap_class();
                     class.methods.borrow_mut().insert(name, method);
                 }
                 OpCode::SetProperty => {
                     let val = self.stack.peek(1);
                     if let Value::Instance(inst) = val {
-                        let idx = self.read_byte();
-                        let val = self.read_constant(idx);
+                        let val = self.read_constant();
                         if let Value::String(name) = val {
                             let arg = self.stack.pop();
                             inst.fields.borrow_mut().insert(name, arg);
@@ -348,10 +327,7 @@ impl<W: Write> VM<W> {
                     let Value::Instance(instance) = self.stack.peek(0) else {
                         return self.runtime_error("Only instances have properties.");
                     };
-                    let idx = self.read_byte();
-                    let Value::String(name) = self.read_constant(idx) else {
-                        unreachable!()
-                    };
+                    let name = self.read_constant().unwrap_string();
 
                     if let Some(field) = instance.fields.borrow().get(&name) {
                         self.stack.pop();
@@ -362,10 +338,7 @@ impl<W: Write> VM<W> {
                     }
                 }
                 OpCode::DeleteProperty => {
-                    let idx = self.read_byte();
-                    let Value::String(name) = self.read_constant(idx) else {
-                        unreachable!()
-                    };
+                    let name = self.read_constant().unwrap_string();
                     let Value::Instance(instance) = self.stack.pop() else {
                         return self.runtime_error("Can only delete fields on instances.");
                     };
@@ -482,7 +455,8 @@ impl<W: Write> VM<W> {
         (hi << 8) | lo
     }
 
-    fn read_constant(&self, idx: u8) -> Value {
+    fn read_constant(&mut self) -> Value {
+        let idx = self.read_byte();
         let frame = self.current_frame();
         frame.get_function().chunk.constants[idx as usize]
     }

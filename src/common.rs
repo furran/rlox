@@ -126,6 +126,48 @@ impl Value {
             _ => false,
         }
     }
+
+    pub fn unwrap_string(self) -> Gc<ObjString> {
+        match self {
+            Value::String(s) => s,
+            _ => panic!("Expected Value::String"),
+        }
+    }
+
+    pub fn unwrap_function(self) -> Gc<ObjFunction> {
+        match self {
+            Value::Function(f) => f,
+            _ => panic!("Expected Value::Function"),
+        }
+    }
+
+    pub fn unwrap_closure(self) -> Gc<ObjClosure> {
+        match self {
+            Value::Closure(c) => c,
+            _ => panic!("Expected Value::Closure"),
+        }
+    }
+
+    pub fn unwrap_class(self) -> Gc<ObjClass> {
+        match self {
+            Value::Class(c) => c,
+            _ => panic!("Expected Value::Class"),
+        }
+    }
+
+    pub fn unwrap_instance(self) -> Gc<ObjInstance> {
+        match self {
+            Value::Instance(i) => i,
+            _ => panic!("Expected Value::Instance"),
+        }
+    }
+
+    pub fn unwrap_bound_method(self) -> Gc<ObjBoundMethod> {
+        match self {
+            Value::BoundMethod(b) => b,
+            _ => panic!("Expected Value::BoundMethod"),
+        }
+    }
 }
 
 impl PartialEq for Value {
