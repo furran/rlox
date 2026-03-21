@@ -308,6 +308,9 @@ impl<W: Write> VM<W> {
                     let method = self.stack.pop().unwrap_closure();
                     let class = self.stack.peek(0).unwrap_class();
                     class.methods.borrow_mut().insert(name, method);
+                    if name == self.init_string {
+                        class.initializer.set(Some(method));
+                    }
                 }
                 OpCode::SetProperty => {
                     let val = self.stack.peek(1);
@@ -505,7 +508,7 @@ impl<W: Write> VM<W> {
                 let instance = Value::Instance(self.allocate(obj_instance));
                 let top = self.stack.top;
                 self.stack[top - arg_count - 1] = instance;
-                if let Some(&initializer) = class.methods.borrow().get(&self.init_string) {
+                if let Some(initializer) = class.initializer.get() {
                     return self.call(initializer, arg_count);
                 } else if arg_count != 0 {
                     return self

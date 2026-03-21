@@ -95,6 +95,7 @@ impl fmt::Display for ObjClosure {
 pub struct ObjClass {
     pub name: Gc<ObjString>,
     pub methods: RefCell<HashMap<Gc<ObjString>, Gc<ObjClosure>>>,
+    pub initializer: Cell<Option<Gc<ObjClosure>>>,
 }
 
 impl ObjClass {
@@ -102,6 +103,7 @@ impl ObjClass {
         Self {
             name,
             methods: RefCell::new(HashMap::new()),
+            initializer: Cell::new(None),
         }
     }
 }
