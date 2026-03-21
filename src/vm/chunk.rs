@@ -55,18 +55,50 @@ impl Chunk {
             .unwrap_or_default()
     }
 
-    pub fn instruction_size(&self, offset: usize) -> usize {
+    pub fn instruction_info(&self, offset: usize) -> String {
         let opcode = OpCode::from(self.code[offset]);
         match opcode {
+            OpCode::Constant
+            | OpCode::Method
+            | OpCode::Class
+            | OpCode::GetProperty
+            | OpCode::SetProperty => {
+                let idx = self.code[offset + 1];
+                format!("const[{}] = {}", idx, self.constants[idx as usize])
+            }
+            OpCode::DefineGlobal | OpCode::GetGlobal | OpCode::SetGlobal => {
+                let slot = self.code[offset + 1];
+                format!("slot:global:{}", slot)
+            }
+            OpCode::GetLocal | OpCode::SetLocal => {
+                format!("slot:local[{}]", self.code[offset + 1])
+            }
+            OpCode::GetUpvalue | OpCode::SetUpvalue => {
+                format!("slot:upvalue[{}]", self.code[offset + 1])
+            }
+            OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
+                let jump_offset =
+                    ((self.code[offset + 1] as usize) << 8) | self.code[offset + 2] as usize;
+                let target = offset + 3 + jump_offset;
+                format!("target -> {:04x}", target)
+            }
             OpCode::Closure => {
                 let func_idx = self.code[offset + 1];
+                let mut info = format!("fn:[{}] = {}", func_idx, self.constants[func_idx as usize]);
                 if let Value::Function(func) = self.constants[func_idx as usize] {
-                    1 + (func.upvalue_count as usize)
-                } else {
-                    1
+                    for i in 0..func.upvalue_count as usize {
+                        let is_local = self.code[offset + 2 + i * 2] != 0;
+                        let idx = self.code[offset + 3 + i * 2];
+                        let uv = if is_local { "local[" } else { "upvalue[" };
+                        info.push_str(&format!(", upvalue:{}{}]", uv, idx));
+                    }
                 }
+                info
             }
-            other => other.operand_count(),
+            OpCode::Call => {
+                format!("args:{}", self.code[offset + 1])
+            }
+            _ => format!(""),
         }
     }
 
@@ -91,14 +123,25 @@ impl Chunk {
         }
 
         let opcode = OpCode::from(self.code[offset]);
-        let operand_count = self.instruction_size(offset);
-        print!("{:?}", opcode);
-        for op in 0..operand_count {
-            print!(" {}", op);
-        }
-        println!();
+        print!("{:<15}", format!("{:?}", opcode));
+        let info = self.instruction_info(offset);
+        println!(" {}", info);
+        self.instruction_size(offset)
+    }
 
-        operand_count + 1
+    pub fn instruction_size(&self, offset: usize) -> usize {
+        let opcode = OpCode::from(self.code[offset]);
+        match opcode {
+            OpCode::Closure => {
+                let func_idx = self.code[offset + 1];
+                if let Value::Function(func) = self.constants[func_idx as usize] {
+                    2 + (func.upvalue_count as usize * 2)
+                } else {
+                    2
+                }
+            }
+            other => 1 + other.operand_count(),
+        }
     }
 }
 
