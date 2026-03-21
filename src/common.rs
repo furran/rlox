@@ -3,7 +3,7 @@ use std::ops::Neg;
 
 use rlox_gc::{Gc, Trace};
 
-use crate::object::{ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString};
+use crate::object::{ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString};
 
 macro_rules! define_instructions {
     (
@@ -12,8 +12,7 @@ macro_rules! define_instructions {
         ), * $(,)?
     ) => {
 
-        #[derive(Debug)]
-        #[repr(u8)]
+        #[derive(Debug, PartialEq)]
         pub enum OpCode {
             $(
                 $variant
@@ -68,11 +67,13 @@ define_instructions! {
     Print,
     Pop,
     Call(arg_count: u8),
-    Closure(index: u8),
+    Invoke(name_index: u8, arg_count: u8),
+    Closure,
     CloseUpvalue,
     Return,
 
     Class(name_index: u8),
+    Method(name_index: u8),
     SetProperty(prop_index: u8),
     GetProperty(prop_index: u8),
     DeleteProperty(index: u8),
@@ -114,6 +115,7 @@ pub enum Value {
     Closure(Gc<ObjClosure>),
     Class(Gc<ObjClass>),
     Instance(Gc<ObjInstance>),
+    BoundMethod(Gc<ObjBoundMethod>),
 }
 
 impl Value {
@@ -151,6 +153,7 @@ impl fmt::Display for Value {
             Value::Closure(x) => write!(f, "{}", x),
             Value::Class(x) => write!(f, "{}", x.name),
             Value::Instance(x) => write!(f, "{}", x),
+            Value::BoundMethod(x) => write!(f, "{}", x.method.function),
         }
     }
 }

@@ -11,7 +11,7 @@ use rlox_gc::{Gc, Trace};
 use crate::{
     common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    object::{ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString, Upvalue},
+    object::{ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString, Upvalue},
     vm::heap::LoxHeap,
 };
 
@@ -163,18 +163,22 @@ pub struct VM<W: Write> {
     global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
     open_upvalues: HashMap<usize, Gc<Upvalue>>,
+    init_string: Gc<ObjString>,
     output: W,
 }
 
 impl<W: Write> VM<W> {
     pub fn new(output: W) -> Self {
+        let mut heap = LoxHeap::new();
+        let init_string = heap.intern("init");
         Self {
             stack: Stack::new(),
-            heap: LoxHeap::new(),
+            heap,
             globals: Vec::new(),
             global_indices: GlobalIndices::new(),
             frames: Vec::with_capacity(64),
             open_upvalues: HashMap::new(),
+            init_string,
             output,
         }
     }
@@ -254,6 +258,15 @@ impl<W: Write> VM<W> {
                     let arg_count = self.read_byte() as usize;
                     self.call_value(self.stack.peek(arg_count), arg_count)?;
                 }
+                OpCode::Invoke => {
+                    let idx = self.read_byte();
+                    let Value::String(name) = self.read_constant(idx) else {
+                        unreachable!()
+                    };
+                    let arg_count = self.read_byte() as usize;
+
+                    self.invoke(name, arg_count)?;
+                }
                 OpCode::Closure => {
                     let idx = self.read_byte();
                     let value = self.read_constant(idx);
@@ -300,8 +313,21 @@ impl<W: Write> VM<W> {
                         let class = self.allocate(ObjClass::new(name));
                         self.stack.push(Value::Class(class));
                     } else {
-                        return self.runtime_error("Something went very wrong!");
+                        unreachable!();
                     }
+                }
+                OpCode::Method => {
+                    let idx = self.read_byte();
+                    let Value::String(name) = self.read_constant(idx) else {
+                        unreachable!()
+                    };
+                    let Value::Closure(method) = self.stack.pop() else {
+                        unreachable!()
+                    };
+                    let Value::Class(class) = self.stack.peek(0) else {
+                        unreachable!()
+                    };
+                    class.methods.borrow_mut().insert(name, method);
                 }
                 OpCode::SetProperty => {
                     let val = self.stack.peek(1);
@@ -326,14 +352,14 @@ impl<W: Write> VM<W> {
                     let Value::String(name) = self.read_constant(idx) else {
                         unreachable!()
                     };
-                    let field = instance
-                        .fields
-                        .borrow()
-                        .get(&name)
-                        .copied()
-                        .unwrap_or(Value::Nil);
-                    self.stack.pop();
-                    self.stack.push(field);
+
+                    if let Some(field) = instance.fields.borrow().get(&name) {
+                        self.stack.pop();
+                        self.stack.push(*field);
+                    } else {
+                        let value = self.bind_method(instance.class, name);
+                        self.stack.push(value);
+                    }
                 }
                 OpCode::DeleteProperty => {
                     let idx = self.read_byte();
@@ -505,9 +531,61 @@ impl<W: Write> VM<W> {
                 let instance = Value::Instance(self.allocate(obj_instance));
                 let top = self.stack.top;
                 self.stack[top - arg_count - 1] = instance;
+                if let Some(&initializer) = class.methods.borrow().get(&self.init_string) {
+                    return self.call(initializer, arg_count);
+                } else if arg_count != 0 {
+                    return self
+                        .runtime_error(format!("Expected 0 arguments but got {}", arg_count));
+                }
                 Ok(())
             }
+            Value::BoundMethod(bound) => {
+                let top = self.stack.top;
+                self.stack[top - arg_count - 1] = bound.receiver;
+                self.call(bound.method, arg_count)
+            }
             _ => self.runtime_error("Can only call functions and classes."),
+        }
+    }
+
+    fn invoke(&mut self, name: Gc<ObjString>, arg_count: usize) -> VMResult {
+        let receiver = self.stack.peek(arg_count);
+        let Value::Instance(instance) = receiver else {
+            return self.runtime_error("Only instances have methods.");
+        };
+
+        if let Some(&value) = instance.fields.borrow().get(&name) {
+            let top = self.stack.top;
+            self.stack[top - arg_count - 1] = value;
+            return self.call_value(value, arg_count);
+        }
+
+        self.invoke_from_class(instance.class, name, arg_count)
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        class: Gc<ObjClass>,
+        name: Gc<ObjString>,
+        arg_count: usize,
+    ) -> VMResult {
+        if let Some(&method) = class.methods.borrow().get(&name) {
+            self.call(method, arg_count)
+        } else {
+            self.runtime_error(format!("Undefined property '{}'", name))
+        }
+    }
+
+    fn bind_method(&mut self, class: Gc<ObjClass>, name: Gc<ObjString>) -> Value {
+        if let Some(&method) = class.methods.borrow().get(&name) {
+            let bound = ObjBoundMethod::new(self.stack.peek(0), method);
+            let bound_ref = self.allocate(bound);
+            // we pop after allocation to avoid collection of stack value
+            self.stack.pop();
+            Value::BoundMethod(bound_ref)
+        } else {
+            self.stack.pop();
+            Value::Nil
         }
     }
 
@@ -581,10 +659,10 @@ impl<W: Write> VM<W> {
                 &self.open_upvalues,
                 &self.globals,
                 &self.global_indices,
+                &self.init_string,
             );
             self.heap.collect(&roots);
         }
-        dbg!(std::any::type_name::<T>());
         self.heap.alloc_raw(value)
     }
 
@@ -596,6 +674,7 @@ impl<W: Write> VM<W> {
                 &self.open_upvalues,
                 &self.globals,
                 &self.global_indices,
+                &self.init_string,
             );
             self.heap.collect(&roots);
         }
@@ -625,17 +704,8 @@ struct Roots<'a>(
     &'a HashMap<usize, Gc<Upvalue>>,
     &'a Vec<Option<Value>>,
     &'a GlobalIndices,
+    &'a Gc<ObjString>,
 );
-
-impl<W: Write> Trace for VM<W> {
-    fn trace(&self) {
-        self.stack.trace();
-        self.frames.trace();
-        self.open_upvalues.trace();
-        self.globals.trace();
-        self.global_indices.trace();
-    }
-}
 
 pub fn repl() -> std::io::Result<()> {
     let stdin = std::io::stdin();

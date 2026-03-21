@@ -1,4 +1,4 @@
-use core::{fmt, panic};
+use core::fmt;
 
 use rlox_gc::Trace;
 
@@ -55,12 +55,27 @@ impl Chunk {
             .unwrap_or_default()
     }
 
+    pub fn instruction_size(&self, offset: usize) -> usize {
+        let opcode = OpCode::from(self.code[offset]);
+        match opcode {
+            OpCode::Closure => {
+                let func_idx = self.code[offset + 1];
+                if let Value::Function(func) = self.constants[func_idx as usize] {
+                    1 + (func.upvalue_count as usize)
+                } else {
+                    1
+                }
+            }
+            other => other.operand_count(),
+        }
+    }
+
     pub fn disassemble(&self, name: &str) {
         println!("== {} start ==", name);
         let mut offset = 0;
 
         while offset < self.code.len() {
-            offset = self.disassemble_instruction(offset);
+            offset += self.disassemble_instruction(offset);
         }
         println!("==  {} end  ==", name);
     }
@@ -76,45 +91,14 @@ impl Chunk {
         }
 
         let opcode = OpCode::from(self.code[offset]);
-        let operand_count = opcode.operand_count();
-
-        match operand_count {
-            0 => {
-                println!("{:?}", opcode);
-                offset + 1
-            }
-            1 => {
-                if offset + 1 >= self.code.len() {
-                    panic!("ERROR: {:?} missing operand", opcode);
-                }
-                let operand = self.code[offset + 1];
-                match opcode {
-                    OpCode::Constant => {
-                        let value = self.constants[operand as usize];
-                        println!("{:?} {} ", opcode, value);
-                    }
-                    _ => println!("{:?} {:4} ", opcode, operand),
-                }
-                offset + 2
-            }
-            2 => {
-                if offset + 2 >= self.code.len() {
-                    println!("ERROR: {:?} missing operands", opcode);
-                    return offset + 1;
-                }
-                let operand1 = self.code[offset + 1];
-                let operand2 = self.code[offset + 2];
-
-                println!("{:?} {:02x}{:02x}", opcode, operand1, operand2);
-                offset + 3
-            }
-            _ => {
-                panic!(
-                    "{:?} (unsupported operand count: {})",
-                    opcode, operand_count
-                )
-            }
+        let operand_count = self.instruction_size(offset);
+        print!("{:?}", opcode);
+        for op in 0..operand_count {
+            print!(" {}", op);
         }
+        println!();
+
+        operand_count + 1
     }
 }
 

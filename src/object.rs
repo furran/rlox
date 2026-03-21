@@ -94,11 +94,15 @@ impl fmt::Display for ObjClosure {
 #[derive(Debug, Trace)]
 pub struct ObjClass {
     pub name: Gc<ObjString>,
+    pub methods: RefCell<HashMap<Gc<ObjString>, Gc<ObjClosure>>>,
 }
 
 impl ObjClass {
     pub fn new(name: Gc<ObjString>) -> Self {
-        Self { name }
+        Self {
+            name,
+            methods: RefCell::new(HashMap::new()),
+        }
     }
 }
 
@@ -120,6 +124,18 @@ impl ObjInstance {
 impl Display for ObjInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<{} instance>", self.class.name)
+    }
+}
+
+#[derive(Debug, Trace)]
+pub struct ObjBoundMethod {
+    pub receiver: Value,
+    pub method: Gc<ObjClosure>,
+}
+
+impl ObjBoundMethod {
+    pub fn new(receiver: Value, method: Gc<ObjClosure>) -> Self {
+        Self { receiver, method }
     }
 }
 

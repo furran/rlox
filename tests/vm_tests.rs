@@ -683,3 +683,129 @@ fn test_delete_field_from_non_instance_errors() {
     );
     assert!(result.is_err());
 }
+
+#[test]
+fn test_access_method() {
+    let output = run(r#"
+        class Brunch {  
+            eggs() {}
+        }
+
+        var brunch = Brunch();
+        var eggs = brunch.eggs;
+        print eggs;
+    "#);
+    assert_eq!(output.trim(), "<fn eggs>");
+}
+
+#[test]
+fn test_call_method() {
+    let output = run(r#"
+        class Scone {
+            topping(first, second) {
+                print "scone with " + first + " and " + second;
+            }
+        }
+
+        var scone = Scone();
+        scone.topping("berries", "cream");
+    "#);
+    assert_eq!(output.trim(), "scone with berries and cream");
+}
+
+#[test]
+fn test_call_nested_method_with_this() {
+    let output = run(r#"
+        class Nested {
+            method() {
+                fun function() {
+                    print this;
+                }
+                function();
+            }
+        }
+        Nested().method();
+    "#);
+    assert_eq!(output.trim(), "<Nested instance>");
+}
+
+#[test]
+fn test_instance_initializer() {
+    let output = run(r#"
+        class CoffeeMaker {
+            init(coffee) {
+                this.coffee = coffee;
+            }
+
+            brew() {
+                print "Enjoy your cup of " + this.coffee;
+                this.coffee = nil;
+            }
+        }
+
+        var maker = CoffeeMaker("coffee and chicory");
+        maker.brew();
+    "#);
+    assert_eq!(output.trim(), "Enjoy your cup of coffee and chicory");
+}
+
+#[test]
+fn test_instance_initializer_errors_on_return() {
+    let mut vm = VM::new(Vec::new());
+    let result = vm.interpret(
+        r#"
+        class CoffeeMaker {
+            init(coffee) {
+                this.coffee = coffee;
+                return this;
+            }
+        }
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_use_this_at_top_level_is_error() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        print this;
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_use_this_in_function_is_error() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        fun notMethod() {
+            print this;
+        }
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_invoke_field_access() {
+    let output = run(r#"
+        class Oops {
+            init() {
+                fun f() {
+                    print "not a method";
+                }
+
+                this.field = f;
+            }
+        }
+        var oops = Oops();
+        var f = oops.field();
+    "#);
+
+    assert_eq!(output.trim(), "not a method");
+}

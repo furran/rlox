@@ -39,7 +39,7 @@ struct ParseRule<'src> {
 
 #[derive(Debug, Copy, Clone)]
 struct Local<'src> {
-    token: Token<'src>,
+    name: &'src str,
     depth: u8,
     is_captured: bool,
 }
@@ -47,7 +47,7 @@ struct Local<'src> {
 impl<'src> Default for Local<'src> {
     fn default() -> Self {
         Self {
-            token: Default::default(),
+            name: "",
             depth: u8::MAX,
             is_captured: false,
         }
@@ -89,18 +89,28 @@ struct Upvalue {
     pub is_local: bool,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum FunctionType {
+    Script,
+    Function,
+    Method,
+    Initializer,
+}
+
 #[derive(Debug)]
 struct FunctionContext<'src> {
     pub function: ObjFunction,
+    pub function_type: FunctionType,
     pub locals: Vec<Local<'src>>,
     pub upvalues: Vec<Upvalue>,
     pub scope_depth: u8,
 }
 
 impl<'src> FunctionContext<'src> {
-    pub fn new(name: Option<Gc<ObjString>>) -> Self {
+    pub fn new(name: Option<Gc<ObjString>>, function_type: FunctionType) -> Self {
         Self {
             function: ObjFunction::new(name),
+            function_type,
             locals: Vec::with_capacity(u8::MAX as usize),
             upvalues: Vec::new(),
             scope_depth: 0,
@@ -116,6 +126,7 @@ pub struct Compiler<'src> {
     current: Token<'src>,
     heap: &'src mut LoxHeap,
     global_indices: &'src mut GlobalIndices,
+    method_depth: usize,
     errors: Vec<CompileError>,
     can_assign: bool,
     had_error: bool,
@@ -129,12 +140,13 @@ impl<'src> Compiler<'src> {
         global_indices: &mut GlobalIndices,
     ) -> Result<ObjFunction, VMError> {
         let mut compiler = Compiler {
-            contexts: vec![FunctionContext::new(None)],
+            contexts: vec![FunctionContext::new(None, FunctionType::Script)],
             scanner: Scanner::new(source),
             previous: Token::default(),
             current: Token::default(),
             heap: heap,
             global_indices,
+            method_depth: 0,
             errors: Vec::new(),
             can_assign: false,
             had_error: false,
@@ -142,7 +154,7 @@ impl<'src> Compiler<'src> {
         };
         // reserve slot 0 for function itself
         compiler.current_context_mut().locals.push(Local {
-            token: Token::default(),
+            name: "",
             depth: 0,
             is_captured: false,
         });
@@ -201,6 +213,9 @@ impl<'src> Compiler<'src> {
     }
 
     fn end_function(&mut self) -> FunctionContext<'_> {
+        if self.current_context().function_type == FunctionType::Method {
+            self.method_depth -= 1;
+        }
         self.emit_return();
         #[cfg(debug_assertions)]
         {
@@ -215,15 +230,25 @@ impl<'src> Compiler<'src> {
         self.contexts.pop().unwrap()
     }
 
-    fn begin_function(&mut self) {
+    fn begin_function(&mut self, function_type: FunctionType) {
         let name = self.heap.intern(self.previous.lexeme);
-        self.contexts.push(FunctionContext::new(Some(name)));
-        // reserve slot 0 for function itself
-        self.current_context_mut().locals.push(Local {
-            token: Token::default(),
-            depth: 0,
-            is_captured: false,
-        });
+        self.contexts
+            .push(FunctionContext::new(Some(name), function_type));
+
+        if function_type != FunctionType::Function {
+            self.current_context_mut().locals.push(Local {
+                name: "this",
+                depth: 0,
+                is_captured: false,
+            });
+            self.method_depth += 1;
+        } else {
+            self.current_context_mut().locals.push(Local {
+                name: "",
+                depth: 0,
+                is_captured: false,
+            });
+        }
     }
 
     fn begin_scope(&mut self) {
@@ -305,7 +330,11 @@ impl<'src> Compiler<'src> {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::Nil);
+        if self.current_context().function_type == FunctionType::Initializer {
+            self.emit_bytes(OpCode::GetLocal, 0);
+        } else {
+            self.emit_byte(OpCode::Nil);
+        }
         self.emit_byte(OpCode::Return);
     }
 
@@ -323,7 +352,7 @@ impl<'src> Compiler<'src> {
 
     fn resolve_local(&mut self, name: &str) -> Option<u8> {
         for (i, local) in self.current_context_mut().locals.iter().enumerate().rev() {
-            if local.token.lexeme == name {
+            if local.name == name {
                 if local.depth == u8::MAX {
                     self.error_at_current("Can't read local variable in its own initializer.");
                 }
@@ -336,7 +365,7 @@ impl<'src> Compiler<'src> {
     fn resolve_local_in(name: &str, functions: &[FunctionContext]) -> Option<u8> {
         let locals = &functions.last()?.locals;
         for (i, local) in locals.iter().enumerate().rev() {
-            if local.token.lexeme == name {
+            if local.name == name {
                 if local.depth == u8::MAX {
                     return None;
                 }
@@ -397,13 +426,13 @@ impl<'src> Compiler<'src> {
         slot
     }
 
-    fn add_local(&mut self, token: Token<'src>) {
+    fn add_local(&mut self, name: &'src str) {
         if self.current_context_mut().locals.len() == u8::MAX as usize {
             self.error_at_current("Too many variables in function.");
             return;
         }
         self.current_context_mut().locals.push(Local {
-            token,
+            name,
             depth: u8::MAX,
             is_captured: false,
         });
@@ -413,7 +442,7 @@ impl<'src> Compiler<'src> {
         if self.current_context_mut().scope_depth == 0 {
             return;
         }
-        let token = self.previous;
+        let name = self.previous.lexeme;
         let current_depth = self.current_context().scope_depth;
         let duplicate = self
             .current_context()
@@ -421,11 +450,11 @@ impl<'src> Compiler<'src> {
             .iter()
             .rev()
             .take_while(|l| l.depth >= current_depth)
-            .any(|l| l.token.lexeme == token.lexeme);
+            .any(|l| l.name == name);
         if duplicate {
             self.error_at_current("Already a variable with this name in this scope.");
         }
-        self.add_local(token);
+        self.add_local(name);
     }
 
     fn parse_variable(&mut self, message: &str) -> u8 {
@@ -484,7 +513,7 @@ impl<'src> Compiler<'src> {
     fn function_declaration(&mut self) {
         let global = self.parse_variable("Expected function name.");
         self.mark_initialized();
-        self.function();
+        self.function(FunctionType::Function);
         self.define_variable(global);
     }
 
@@ -647,12 +676,6 @@ impl<'src> Compiler<'src> {
         self.emit_bytes(OpCode::DeleteProperty, idx);
     }
 
-    fn delete_property_statement(&mut self) {
-        self.delete();
-        self.consume(TokenType::Semicolon, "Expected ';' after delete statement.");
-        self.emit_byte(OpCode::Pop);
-    }
-
     fn and(&mut self) {
         let end_jump = self.emit_jump(OpCode::JumpIfFalse);
         self.emit_byte(OpCode::Pop);
@@ -684,6 +707,9 @@ impl<'src> Compiler<'src> {
         if self.matches(TokenType::Semicolon) {
             self.emit_return();
         } else {
+            if self.current_context().function_type == FunctionType::Initializer {
+                self.error_at_current("Can't return a value from an initializer.");
+            }
             self.expression();
             self.consume(TokenType::Semicolon, "Expected ';' after return value.");
             self.emit_byte(OpCode::Return);
@@ -744,8 +770,6 @@ impl<'src> Compiler<'src> {
             self.while_statement();
         } else if self.matches(TokenType::For) {
             self.for_statement();
-        } else if self.matches(TokenType::Delete) {
-            self.delete_property_statement();
         } else {
             self.expression_statement();
         }
@@ -817,6 +841,10 @@ impl<'src> Compiler<'src> {
         if self.can_assign && self.matches(TokenType::Equal) {
             self.expression();
             self.emit_bytes(OpCode::SetProperty, name_index);
+        } else if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::Invoke, name_index);
+            self.emit_byte(arg_count);
         } else {
             self.emit_bytes(OpCode::GetProperty, name_index);
         }
@@ -853,8 +881,19 @@ impl<'src> Compiler<'src> {
         }
     }
 
-    fn function(&mut self) {
-        self.begin_function();
+    fn is_in_method(&self) -> bool {
+        self.method_depth > 0
+    }
+
+    fn this(&mut self) {
+        if !self.is_in_method() {
+            self.error_at_current("Can't use 'this' outside of a class method.");
+        }
+        self.variable();
+    }
+
+    fn function(&mut self, function_type: FunctionType) {
+        self.begin_function(function_type);
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expected '(' after function name.");
         if !self.check(TokenType::RightParen) {
@@ -888,14 +927,33 @@ impl<'src> Compiler<'src> {
         }
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expected method name.");
+        let name = self.heap.intern(self.previous.lexeme);
+        let name_idx = self.make_constant(Value::String(name));
+        let kind = if self.previous.lexeme == "init" {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
+        self.function(kind);
+        self.emit_bytes(OpCode::Method, name_idx);
+    }
+
     fn class_declaration(&mut self) {
         let global_idx = self.parse_variable("Expected class name.");
         let name = self.heap.intern(&self.previous.lexeme);
-        let name_const = self.make_constant(Value::String(name));
-        self.emit_bytes(OpCode::Class, name_const);
+        let name_idx = self.make_constant(Value::String(name));
+        self.emit_bytes(OpCode::Class, name_idx);
+
         self.define_variable(global_idx);
+        self.variable();
         self.consume(TokenType::LeftBrace, "Expected '{' before class body.");
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expected '}' after class body.");
+        self.emit_byte(OpCode::Pop);
     }
 
     fn string(&mut self) {
@@ -1039,6 +1097,11 @@ impl<'src> Compiler<'src> {
             },
             TokenType::Delete => ParseRule {
                 prefix: Some(Compiler::delete),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::This => ParseRule {
+                prefix: Some(Compiler::this),
                 infix: None,
                 precedence: Precedence::None,
             },
