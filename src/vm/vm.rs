@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fmt::Debug,
+    fmt::{Debug, Display},
     io::Write,
     mem::{self},
     ops::{Deref, DerefMut},
@@ -20,6 +20,22 @@ pub enum VMError {
     RuntimeError(String),
     CompileError(Vec<CompileError>),
 }
+
+impl Display for VMError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VMError::RuntimeError(msg) => write!(f, "{msg}"),
+            VMError::CompileError(errors) => {
+                for e in errors {
+                    writeln!(f, "{e}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for VMError {}
 
 pub type VMResult = Result<(), VMError>;
 
@@ -183,7 +199,13 @@ impl<W: Write> VM<W> {
         }
     }
 
-    pub fn run_file(_source: &String) {}
+    pub fn run_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let source = std::fs::read_to_string(path)?;
+        let output = std::io::stdout();
+        let mut vm = VM::new(output);
+        vm.interpret(&source)?;
+        Ok(())
+    }
 
     pub fn interpret(&mut self, source: &str) -> VMResult {
         let function = Compiler::compile(source, &mut self.heap, &mut self.global_indices)?;
