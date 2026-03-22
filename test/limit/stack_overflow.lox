@@ -1,5 +1,5 @@
 fun foo() {
-  var a1;
+  {var a1;
   var a2;
   var a3;
   var a4;
@@ -14,7 +14,7 @@ fun foo() {
   var a13;
   var a14;
   var a15;
-  var a16;
+  var a16;}
   foo(); // expect runtime error: Stack overflow.
 }
 
