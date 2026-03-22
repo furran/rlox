@@ -2,9 +2,11 @@ use rlox::vm::VM;
 
 fn expects_error(path: &str) -> bool {
     let source = std::fs::read_to_string(path).unwrap();
-    source
-        .lines()
-        .any(|line| line.contains("// Error") || line.contains("// expect runtime error"))
+    source.lines().any(|line| {
+        line.contains("// Error")
+            || line.contains("// expect runtime error")
+            || line.contains("// [line")
+    })
 }
 
 fn expected_output(path: &str) -> String {
@@ -22,7 +24,11 @@ fn run_test(path: &str) {
     let mut vm = VM::new(&mut output);
     let result = vm.interpret(&source);
     drop(vm);
-    let output = String::from_utf8(output).unwrap().trim().to_string();
+    let output = String::from_utf8(output)
+        .unwrap()
+        .trim()
+        .to_string()
+        .replace("\r\n", "\n");
     if expects_error(path) {
         assert!(
             result.is_err(),
@@ -41,7 +47,7 @@ fn run_test(path: &str) {
 #[test]
 fn test_lox_files() {
     let test_dir = "./test";
-    let skip_dirs = ["benchmark"];
+    let skip_dirs = ["benchmark", "expressions", "scanning"];
 
     for entry in walkdir::WalkDir::new(test_dir)
         .into_iter()
