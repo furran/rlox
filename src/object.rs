@@ -108,6 +108,12 @@ impl ObjClass {
     }
 }
 
+impl Display for ObjClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Debug, Trace)]
 pub struct ObjInstance {
     pub class: Gc<ObjClass>,

@@ -1,6 +1,9 @@
 use rlox::{
     common::Value,
-    vm::{VM, vm::VMError},
+    vm::{
+        VM,
+        vm::{VMError, VMResult},
+    },
 };
 
 fn run(source: &str) -> String {
@@ -19,6 +22,17 @@ fn run_repl(lines: &[&str]) -> String {
     }
     drop(vm);
     String::from_utf8(output).unwrap()
+}
+
+fn run_repl_results(lines: &[&str]) -> Vec<VMResult> {
+    let mut output = Vec::new();
+    let mut vm = VM::new(&mut output);
+    let mut results = vec![];
+    for line in lines {
+        results.push(vm.interpret(line));
+    }
+    drop(vm);
+    results
 }
 
 #[test]
@@ -808,4 +822,98 @@ fn test_invoke_field_access() {
     "#);
 
     assert_eq!(output.trim(), "not a method");
+}
+
+#[test]
+fn test_inheritance_basic() {
+    let output = run(r#"
+        class Doughnut {
+            cook() {
+                print "Dunk in the fryer.";
+            }
+        }
+
+        class Cruller < Doughnut {
+            finish() {
+                print "Glaze with icing.";
+            }
+        }
+
+        var x = Cruller();
+        x.cook();
+        x.finish();
+  "#);
+
+    assert_eq!(output.trim(), "Dunk in the fryer.\nGlaze with icing.");
+}
+
+#[test]
+fn test_inherit_from_non_class() {
+    let output = Vec::new();
+    let mut vm = VM::new(output);
+    let result = vm.interpret(
+        r#"
+        var x = "fish";
+        class Doughnut < x {
+            cook() {
+                print "Dunk in the fryer.";
+            }
+        }
+    "#,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_super() {
+    let output = run(r#"
+        class Doughnut {
+            cook() {
+                print "Dunk in the fryer.";
+                this.finish("sprinkles");
+            }
+            finish(ingredient) {
+                print "Finish with " + ingredient;
+            }
+        }
+        class Cruller < Doughnut {
+            finish(ingredient) {
+                super.finish(ingredient + " icing");
+            }
+        }
+        var x = Cruller();
+        x.finish("fish");
+    "#);
+    assert_eq!(output.trim(), "Finish with fish icing")
+}
+
+#[test]
+fn test_super_out_of_class_is_error() {
+    let results = run_repl_results(&[
+        "var super = 1;",
+        "print super;",
+        "super.x = 2;",
+        "super();",
+        "var x = super;",
+    ]);
+    for res in results {
+        assert!(res.is_err());
+    }
+}
+
+#[test]
+fn test_super_in_non_subclass_is_error() {
+    let mut vm = VM::new(Vec::new());
+    let result = vm.interpret(
+        r#"
+        class Cruller {
+            finish(ingredient) {
+                super.finish(ingredient + " icing");
+            }
+        }
+        var x = Cruller();
+        x.finish("fish");
+    "#,
+    );
+    assert!(result.is_err());
 }

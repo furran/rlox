@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::format;
 
 use rlox_gc::Trace;
 
@@ -62,19 +63,20 @@ impl Chunk {
             | OpCode::Method
             | OpCode::Class
             | OpCode::GetProperty
-            | OpCode::SetProperty => {
+            | OpCode::SetProperty
+            | OpCode::GetSuper => {
                 let idx = self.code[offset + 1];
-                format!("const[{}] = {}", idx, self.constants[idx as usize])
+                format!("const[{}]={}", idx, self.constants[idx as usize])
             }
             OpCode::DefineGlobal | OpCode::GetGlobal | OpCode::SetGlobal => {
                 let slot = self.code[offset + 1];
-                format!("slot:global:{}", slot)
+                format!("slot:globals[{}]", slot)
             }
             OpCode::GetLocal | OpCode::SetLocal => {
-                format!("slot:local[{}]", self.code[offset + 1])
+                format!("slot:locals[{}]", self.code[offset + 1])
             }
             OpCode::GetUpvalue | OpCode::SetUpvalue => {
-                format!("slot:upvalue[{}]", self.code[offset + 1])
+                format!("slot:upvalues[{}]", self.code[offset + 1])
             }
             OpCode::Jump | OpCode::JumpIfFalse | OpCode::Loop => {
                 let jump_offset =
@@ -82,9 +84,21 @@ impl Chunk {
                 let target = offset + 3 + jump_offset;
                 format!("target -> {:04x}", target)
             }
+            OpCode::Invoke | OpCode::SuperInvoke => {
+                let idx = self.code[offset + 1];
+                format!(
+                    "const[{}]={} args:{}",
+                    idx,
+                    self.constants[idx as usize],
+                    self.code[offset + 2]
+                )
+            }
             OpCode::Closure => {
                 let func_idx = self.code[offset + 1];
-                let mut info = format!("fn:[{}] = {}", func_idx, self.constants[func_idx as usize]);
+                let mut info = format!(
+                    "fn:const[{}]={}",
+                    func_idx, self.constants[func_idx as usize]
+                );
                 if let Value::Function(func) = self.constants[func_idx as usize] {
                     for i in 0..func.upvalue_count as usize {
                         let is_local = self.code[offset + 2 + i * 2] != 0;

@@ -263,6 +263,15 @@ impl<W: Write> VM<W> {
 
                     self.invoke(name, arg_count)?;
                 }
+                OpCode::SuperInvoke => {
+                    let method = self.read_constant().unwrap_string();
+                    let arg_count = self.read_byte() as usize;
+                    let Value::Class(superclass) = self.stack.pop() else {
+                        return self.runtime_error("Expected class.");
+                    };
+
+                    self.invoke_from_class(superclass, method, arg_count)?;
+                }
                 OpCode::Closure => {
                     let func = self.read_constant().unwrap_function();
                     let mut closure = ObjClosure::new(func);
@@ -282,7 +291,7 @@ impl<W: Write> VM<W> {
                     self.stack.push(Value::Closure(closure_ref));
                 }
                 OpCode::CloseUpvalue => {
-                    self.close_upvalues(self.stack.top);
+                    self.close_upvalues(self.stack.top - 1);
                     self.stack.pop();
                 }
                 OpCode::Return => {
@@ -303,14 +312,32 @@ impl<W: Write> VM<W> {
                     let class = self.allocate(ObjClass::new(name));
                     self.stack.push(Value::Class(class));
                 }
+                OpCode::Inherit => {
+                    let subclass = self.stack.pop().unwrap_class();
+                    let Value::Class(superclass) = self.stack.peek(0) else {
+                        return self.runtime_error("Superclass must be a class.");
+                    };
+                    subclass
+                        .methods
+                        .borrow_mut()
+                        .extend(superclass.methods.borrow().iter().map(|(&k, &v)| (k, v)));
+                }
                 OpCode::Method => {
                     let name = self.read_constant().unwrap_string();
                     let method = self.stack.pop().unwrap_closure();
                     let class = self.stack.peek(0).unwrap_class();
-                    class.methods.borrow_mut().insert(name, method);
                     if name == self.init_string {
                         class.initializer.set(Some(method));
+                    } else {
+                        class.methods.borrow_mut().insert(name, method);
                     }
+                }
+                OpCode::GetSuper => {
+                    let name = self.read_constant().unwrap_string();
+                    let superclass = self.stack.pop().unwrap_class();
+
+                    let val = self.bind_method(superclass, name);
+                    self.stack.push(val);
                 }
                 OpCode::SetProperty => {
                     let val = self.stack.peek(1);

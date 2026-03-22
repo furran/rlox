@@ -322,7 +322,7 @@ impl<'src> Compiler<'src> {
 
     fn make_constant(&mut self, value: Value) -> u8 {
         let idx = self.current_chunk_mut().add_constant(value);
-        if idx > u8::MAX {
+        if idx >= u8::MAX {
             self.error_at_current("Too many constants in one chunk.");
             return 0;
         }
@@ -354,7 +354,7 @@ impl<'src> Compiler<'src> {
         for (i, local) in self.current_context_mut().locals.iter().enumerate().rev() {
             if local.name == name {
                 if local.depth == u8::MAX {
-                    self.error_at_current("Can't read local variable in its own initializer.");
+                    self.error_at_current("Cannot read local variable in its own initializer.");
                 }
                 return Some(i as u8);
             }
@@ -482,7 +482,7 @@ impl<'src> Compiler<'src> {
             loop {
                 self.expression();
                 if arg_count == 255 {
-                    self.error_at_current("Can't have more than 255 arguments.");
+                    self.error_at_current("Cannot have more than 255 arguments.");
                 }
                 arg_count += 1;
                 if !self.matches(TokenType::Comma) {
@@ -702,13 +702,13 @@ impl<'src> Compiler<'src> {
 
     fn return_statement(&mut self) {
         if self.contexts.is_empty() {
-            self.error_at_current("Can't return from top-level code.");
+            self.error_at_current("Cannot return from top-level code.");
         }
         if self.matches(TokenType::Semicolon) {
             self.emit_return();
         } else {
             if self.current_context().function_type == FunctionType::Initializer {
-                self.error_at_current("Can't return a value from an initializer.");
+                self.error_at_current("Cannot return a value from an initializer.");
             }
             self.expression();
             self.consume(TokenType::Semicolon, "Expected ';' after return value.");
@@ -863,7 +863,11 @@ impl<'src> Compiler<'src> {
     }
 
     fn variable(&mut self) {
-        let name = self.previous.lexeme;
+        self.named_variable(self.previous.lexeme);
+    }
+
+    fn named_variable(&mut self, name: &str) {
+        let name = name;
 
         let (get_op, set_op, arg) = if let Some(local_slot) = self.resolve_local(name) {
             (OpCode::GetLocal, OpCode::SetLocal, local_slot)
@@ -887,9 +891,30 @@ impl<'src> Compiler<'src> {
 
     fn this(&mut self) {
         if !self.is_in_method() {
-            self.error_at_current("Can't use 'this' outside of a class method.");
+            self.error_at_current("Cannot use 'this' outside of a class method.");
         }
         self.variable();
+    }
+
+    fn super_(&mut self) {
+        if self.resolve_local("super").is_none() && self.resolve_upvalue("super").is_none() {
+            self.error_at_current("Cannot use 'super' outside of a subclass");
+        }
+        self.consume(TokenType::Dot, "Expected '.' after 'super'.");
+        self.consume(TokenType::Identifier, "Expected superclass method name.");
+        let name = Value::String(self.heap.intern(self.previous.lexeme));
+        let name_idx = self.make_constant(name);
+
+        self.named_variable("this");
+        if self.matches(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable("super");
+            self.emit_bytes(OpCode::SuperInvoke, name_idx);
+            self.emit_byte(arg_count);
+        } else {
+            self.named_variable("super");
+            self.emit_bytes(OpCode::GetSuper, name_idx);
+        }
     }
 
     fn function(&mut self, function_type: FunctionType) {
@@ -900,7 +925,7 @@ impl<'src> Compiler<'src> {
             for arity in 1.. {
                 self.current_context_mut().function.arity = arity;
                 if arity >= 255 {
-                    self.error_at_current("Can't have more than 255 parameters.");
+                    self.error_at_current("Cannot have more than 255 parameters.");
                 }
 
                 let constant = self.parse_variable("Expected parameter name.");
@@ -941,19 +966,46 @@ impl<'src> Compiler<'src> {
     }
 
     fn class_declaration(&mut self) {
-        let global_idx = self.parse_variable("Expected class name.");
-        let name = self.heap.intern(&self.previous.lexeme);
-        let name_idx = self.make_constant(Value::String(name));
+        let slot = self.parse_variable("Expected class name.");
+        let class_name_ref = self.heap.intern(&self.previous.lexeme);
+        let class_name = self.previous.lexeme;
+        let name_idx = self.make_constant(Value::String(class_name_ref));
         self.emit_bytes(OpCode::Class, name_idx);
+        self.define_variable(slot);
 
-        self.define_variable(global_idx);
-        self.variable();
+        let mut has_superclass = false;
+
+        if self.matches(TokenType::Less) {
+            has_superclass = true;
+            self.consume(TokenType::Identifier, "Expected superclass name.");
+            let superclass_name = self.previous.lexeme;
+
+            self.variable();
+
+            if superclass_name == class_name {
+                self.error_at_current("A class cannot inherit from itself.");
+            }
+
+            self.begin_scope();
+            self.add_local("super");
+            self.define_variable(0);
+
+            self.named_variable(class_name);
+            self.emit_byte(OpCode::Inherit);
+        }
+
+        self.named_variable(class_name);
+
         self.consume(TokenType::LeftBrace, "Expected '{' before class body.");
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
             self.method();
         }
         self.consume(TokenType::RightBrace, "Expected '}' after class body.");
         self.emit_byte(OpCode::Pop);
+
+        if has_superclass {
+            self.end_scope();
+        }
     }
 
     fn string(&mut self) {
@@ -1102,6 +1154,11 @@ impl<'src> Compiler<'src> {
             },
             TokenType::This => ParseRule {
                 prefix: Some(Compiler::this),
+                infix: None,
+                precedence: Precedence::None,
+            },
+            TokenType::Super => ParseRule {
+                prefix: Some(Compiler::super_),
                 infix: None,
                 precedence: Precedence::None,
             },

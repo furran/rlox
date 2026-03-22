@@ -68,12 +68,15 @@ define_instructions! {
     Pop,
     Call(arg_count: u8),
     Invoke(name_index: u8, arg_count: u8),
+    SuperInvoke(name_index: u8, arg_count: u8),
     Closure,
     CloseUpvalue,
     Return,
 
     Class(name_index: u8),
+    Inherit,
     Method(name_index: u8),
+    GetSuper(name_index: u8),
     SetProperty(prop_index: u8),
     GetProperty(prop_index: u8),
     DeleteProperty(index: u8),
@@ -130,42 +133,35 @@ impl Value {
     pub fn unwrap_string(self) -> Gc<ObjString> {
         match self {
             Value::String(s) => s,
-            _ => panic!("Expected Value::String"),
+            other => panic!("Expected Value::String, got {:?}.", other),
         }
     }
 
     pub fn unwrap_function(self) -> Gc<ObjFunction> {
         match self {
             Value::Function(f) => f,
-            _ => panic!("Expected Value::Function"),
+            other => panic!("Expected Value::Function, got {:?}.", other),
         }
     }
 
     pub fn unwrap_closure(self) -> Gc<ObjClosure> {
         match self {
             Value::Closure(c) => c,
-            _ => panic!("Expected Value::Closure"),
+            other => panic!("Expected Value::Closure, got {:?}.", other),
         }
     }
 
     pub fn unwrap_class(self) -> Gc<ObjClass> {
         match self {
             Value::Class(c) => c,
-            _ => panic!("Expected Value::Class"),
+            other => panic!("Expected Value::Class, got {:?}.", other),
         }
     }
 
     pub fn unwrap_instance(self) -> Gc<ObjInstance> {
         match self {
             Value::Instance(i) => i,
-            _ => panic!("Expected Value::Instance"),
-        }
-    }
-
-    pub fn unwrap_bound_method(self) -> Gc<ObjBoundMethod> {
-        match self {
-            Value::BoundMethod(b) => b,
-            _ => panic!("Expected Value::BoundMethod"),
+            other => panic!("Expected Value::Instance, got {:?}.", other),
         }
     }
 }
@@ -193,7 +189,7 @@ impl fmt::Display for Value {
             Value::String(x) => write!(f, "{}", x),
             Value::Function(x) => write!(f, "{}", x),
             Value::Closure(x) => write!(f, "{}", x),
-            Value::Class(x) => write!(f, "{}", x.name),
+            Value::Class(x) => write!(f, "{}", x),
             Value::Instance(x) => write!(f, "{}", x),
             Value::BoundMethod(x) => write!(f, "{}", x.method.function),
         }
