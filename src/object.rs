@@ -139,7 +139,7 @@ impl ObjClass {
 
 impl Display for ObjClass {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
+        write!(f, "<class {}>", self.name)
     }
 }
 
