@@ -893,7 +893,11 @@ impl<'src> Compiler<'src> {
         if !self.is_in_method() {
             self.error_at_current("Cannot use 'this' outside of a class method.");
         }
+        // save can_assign state
+        let can_assign = self.can_assign;
+        self.can_assign = false;
         self.variable();
+        self.can_assign = can_assign;
     }
 
     fn super_(&mut self) {
