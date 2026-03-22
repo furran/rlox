@@ -376,7 +376,11 @@ impl<'src> Compiler<'src> {
     }
 
     fn resolve_upvalue(&mut self, name: &str) -> Option<u8> {
-        Self::resolve_upvalue_in(name, &mut self.contexts)
+        let result = Self::resolve_upvalue_in(name, &mut self.contexts);
+        if result == Some(u8::MAX) {
+            self.error_at_current("Too many closure variabless in function.");
+        }
+        result
     }
 
     fn resolve_upvalue_in(name: &str, function_states: &mut [FunctionContext]) -> Option<u8> {
@@ -408,9 +412,9 @@ impl<'src> Compiler<'src> {
         }
 
         let count = function_state.upvalues.len() as u8;
-        // if count >= u8::MAX {
-        //     return Err("Too many closure variables in function.");
-        // }
+        if count >= u8::MAX {
+            return u8::MAX;
+        }
         function_state.upvalues.push(Upvalue { index, is_local });
         function_state.function.upvalue_count = count + 1;
         count
