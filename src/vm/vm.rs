@@ -349,6 +349,7 @@ impl<W: Write> VM<W> {
                         .methods
                         .borrow_mut()
                         .extend(superclass.methods.borrow().iter().map(|(&k, &v)| (k, v)));
+                    subclass.initializer.set(superclass.initializer.get());
                 }
                 OpCode::Method => {
                     let name = self.read_constant().unwrap_string();
