@@ -11,7 +11,10 @@ use rlox_gc::{Gc, Trace};
 use crate::{
     common::{OpCode, Value},
     compiler::{Compiler, compiler::CompileError},
-    object::{ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString, Upvalue},
+    object::{
+        NativeFn, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative,
+        ObjString, Upvalue, native_clock,
+    },
     vm::heap::LoxHeap,
 };
 
@@ -187,7 +190,7 @@ impl<W: Write> VM<W> {
     pub fn new(output: W) -> Self {
         let mut heap = LoxHeap::new();
         let init_string = heap.intern("init");
-        Self {
+        let mut vm = Self {
             stack: Stack::new(),
             heap,
             globals: Vec::new(),
@@ -196,7 +199,10 @@ impl<W: Write> VM<W> {
             open_upvalues: HashMap::new(),
             init_string,
             output,
-        }
+        };
+
+        vm.define_native("clock", 0, native_clock);
+        vm
     }
 
     pub fn run_file(path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -569,6 +575,20 @@ impl<W: Write> VM<W> {
                 self.stack[top - arg_count - 1] = bound.receiver;
                 self.call(bound.method, arg_count)
             }
+            Value::Native(native) => {
+                let arity = native.arity as usize;
+                if arg_count != arity {
+                    return self.runtime_error(format!(
+                        "Expected {} arguments but got {}",
+                        native.arity, arg_count
+                    ));
+                }
+                let arg_start = self.stack.top - arg_count;
+                let result = (native.function)(&self.stack[arg_start..self.stack.top]);
+                self.stack.top -= arg_count + 1;
+                self.stack.push(result);
+                Ok(())
+            }
             _ => self.runtime_error("Can only call functions and classes."),
         }
     }
@@ -705,6 +725,21 @@ impl<W: Write> VM<W> {
         }
 
         self.heap.intern(s)
+    }
+
+    fn define_native(&mut self, name: &'static str, arity: u8, function: NativeFn) {
+        let native = self.heap.alloc_raw(ObjNative {
+            function,
+            arity,
+            name,
+        });
+        let name_ref = self.heap.intern(name);
+        let idx = self.global_indices.len() as u8;
+        let idx = *self.global_indices.entry(name_ref).or_insert(idx) as usize;
+        if idx >= self.globals.len() {
+            self.globals.resize(idx + 1, None);
+        }
+        self.globals[idx] = Some(Value::Native(native));
     }
 }
 

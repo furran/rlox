@@ -63,7 +63,7 @@ fn test_global_variable_uninitialized() {
         var x;
         print x;
     "#);
-    assert_eq!(output.trim(), "Nil")
+    assert_eq!(output.trim(), "nil")
 }
 
 #[test]

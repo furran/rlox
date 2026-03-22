@@ -1,9 +1,11 @@
 use core::fmt;
 use std::{
     cell::{Cell, RefCell},
+    clone,
     collections::HashMap,
     fmt::Display,
     ops::Deref,
+    sync::OnceLock,
 };
 
 use rlox_gc::{Gc, Trace};
@@ -89,6 +91,32 @@ impl fmt::Display for ObjClosure {
             None => write!(f, "<script>"),
         }
     }
+}
+
+pub type NativeFn = fn(&[Value]) -> Value;
+
+#[derive(Debug, Copy, Clone)]
+pub struct ObjNative {
+    pub function: NativeFn,
+    pub arity: u8,
+    pub name: &'static str,
+}
+
+impl Trace for ObjNative {
+    fn trace(&self) {}
+}
+
+impl Display for ObjNative {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<native {}>", self.name)
+    }
+}
+
+static START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
+
+pub fn native_clock(_args: &[Value]) -> Value {
+    let start = START_TIME.get_or_init(std::time::Instant::now);
+    Value::Number(start.elapsed().as_secs_f64())
 }
 
 #[derive(Debug, Trace)]

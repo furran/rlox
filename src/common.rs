@@ -3,7 +3,9 @@ use std::ops::Neg;
 
 use rlox_gc::{Gc, Trace};
 
-use crate::object::{ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjString};
+use crate::object::{
+    ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative, ObjString,
+};
 
 macro_rules! define_instructions {
     (
@@ -115,6 +117,7 @@ pub enum Value {
     Bool(bool),
     String(Gc<ObjString>),
     Function(Gc<ObjFunction>),
+    Native(Gc<ObjNative>),
     Closure(Gc<ObjClosure>),
     Class(Gc<ObjClass>),
     Instance(Gc<ObjInstance>),
@@ -188,6 +191,7 @@ impl fmt::Display for Value {
             Value::Bool(x) => write!(f, "{}", x),
             Value::String(x) => write!(f, "{}", x),
             Value::Function(x) => write!(f, "{}", x),
+            Value::Native(x) => write!(f, "{}", x),
             Value::Closure(x) => write!(f, "{}", x),
             Value::Class(x) => write!(f, "{}", x),
             Value::Instance(x) => write!(f, "{}", x),
