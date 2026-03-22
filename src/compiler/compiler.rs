@@ -436,6 +436,8 @@ impl<'src> Compiler<'src> {
             depth: u8::MAX,
             is_captured: false,
         });
+
+        self.current_context_mut().function.max_locals += 1;
     }
 
     fn declare_variable(&mut self) {

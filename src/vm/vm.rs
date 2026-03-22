@@ -546,6 +546,11 @@ impl<W: Write> VM<W> {
                 arity, arg_count
             ));
         }
+        let slot_offset = self.stack.len() - arg_count - 1;
+        let needed = slot_offset + closure.function.max_locals as usize + 1;
+        if self.frames.len() >= self.frames.capacity() || needed >= self.stack.capacity() {
+            return self.runtime_error("Stack overflow.");
+        }
 
         self.frames.push(CallFrame {
             closure,

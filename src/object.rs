@@ -47,6 +47,7 @@ pub struct ObjFunction {
     pub name: Option<Gc<ObjString>>,
     pub arity: u8,
     pub upvalue_count: u8,
+    pub max_locals: u8,
 }
 
 impl ObjFunction {
@@ -56,6 +57,7 @@ impl ObjFunction {
             name,
             arity: 0,
             upvalue_count: 0,
+            max_locals: 0,
         }
     }
 }
