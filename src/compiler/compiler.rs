@@ -708,7 +708,7 @@ impl<'src> Compiler<'src> {
     }
 
     fn return_statement(&mut self) {
-        if self.contexts.is_empty() {
+        if self.contexts.len() == 1 {
             self.error_at_current("Cannot return from top-level code.");
         }
         if self.matches(TokenType::Semicolon) {
