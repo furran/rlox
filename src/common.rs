@@ -183,7 +183,7 @@ impl PartialEq for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Value::Nil => write!(f, "Nil"),
+            Value::Nil => write!(f, "nil"),
             Value::Number(x) => write!(f, "{}", x),
             Value::Bool(x) => write!(f, "{}", x),
             Value::String(x) => write!(f, "{}", x),
