@@ -799,7 +799,7 @@ impl<'src> Compiler<'src> {
     fn unary(&mut self) {
         let kind = self.previous.kind;
 
-        self.parse_precedence(Precedence::Assignment);
+        self.parse_precedence(Precedence::Unary);
 
         match kind {
             TokenType::Minus => self.emit_byte(OpCode::Negate),
