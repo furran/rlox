@@ -1,5 +1,5 @@
 use core::fmt;
-use std::ops::Neg;
+use std::ops::{Deref, Neg};
 
 use rlox_gc::{Gc, Trace};
 
@@ -212,4 +212,25 @@ impl Neg for Value {
             _ => panic!("Operand must be a number."),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ValuePtr(pub *const Value);
+
+impl Deref for ValuePtr {
+    type Target = *const Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<*const Value> for ValuePtr {
+    fn from(value: *const Value) -> Self {
+        Self(value)
+    }
+}
+
+impl Trace for ValuePtr {
+    fn trace(&self) {}
 }

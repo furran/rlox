@@ -2,14 +2,13 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     io::Write,
-    mem::{self},
     ops::{Deref, DerefMut},
 };
 
 use rlox_gc::{Gc, Trace};
 
 use crate::{
-    common::{OpCode, Value},
+    common::{OpCode, Value, ValuePtr},
     compiler::{Compiler, compiler::CompileError},
     object::{
         NativeFn, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative,
@@ -86,13 +85,15 @@ where
     }
 
     fn push(&mut self, item: T) {
-        self.data[self.top] = item;
+        unsafe {
+            *self.data.get_unchecked_mut(self.top) = item;
+        }
         self.top += 1;
     }
 
     fn pop(&mut self) -> T {
         self.top -= 1;
-        mem::take(&mut self.data[self.top])
+        unsafe { *self.data.get_unchecked(self.top) }
     }
 
     fn top(&self) -> T {
@@ -100,7 +101,7 @@ where
     }
 
     fn peek(&self, offset: usize) -> T {
-        self.data[self.top - 1 - offset]
+        unsafe { *self.data.get_unchecked(self.top - 1 - offset) }
     }
 
     fn truncate(&mut self, len: usize) {
@@ -160,17 +161,37 @@ impl DerefMut for GlobalIndices {
 #[derive(Debug, Trace)]
 struct CallFrame {
     closure: Gc<ObjClosure>,
+    // < store directly for less indirection
+    function: Gc<ObjFunction>,
+    pub code: *const u8,
+    pub constants: ValuePtr,
+    // >
     ip: usize,
     slot_offset: usize,
 }
 
 impl CallFrame {
+    pub fn new(
+        closure: Gc<ObjClosure>,
+        function: Gc<ObjFunction>,
+        ip: usize,
+        slot_offset: usize,
+    ) -> Self {
+        Self {
+            closure,
+            function,
+            code: function.chunk.code.as_ptr(),
+            constants: ValuePtr(function.chunk.constants.as_ptr()),
+            ip,
+            slot_offset,
+        }
+    }
     pub fn get_closure(&self) -> &ObjClosure {
         &self.closure
     }
 
     pub fn get_function(&self) -> &ObjFunction {
-        &self.closure.function
+        &self.function
     }
 }
 
@@ -213,11 +234,8 @@ impl<W: Write> VM<W> {
         let closure_ref = self.heap.alloc_raw(closure);
         self.stack.push(Value::Closure(closure_ref));
 
-        self.frames.push(CallFrame {
-            closure: closure_ref,
-            ip: 0,
-            slot_offset: 0,
-        });
+        self.frames
+            .push(CallFrame::new(closure_ref, func_ref, 0, 0));
 
         self.run()
     }
@@ -492,25 +510,29 @@ impl<W: Write> VM<W> {
         }
     }
 
+    #[inline]
     fn read_byte(&mut self) -> u8 {
         let frame = self.current_frame_mut();
-        let byte = frame.get_function().chunk.code[frame.ip];
+        let byte = unsafe { *frame.code.add(frame.ip) };
         frame.ip += 1;
         byte
     }
 
+    #[inline]
     fn read_short(&mut self) -> u16 {
         let hi = self.read_byte() as u16;
         let lo = self.read_byte() as u16;
         (hi << 8) | lo
     }
 
+    #[inline]
     fn read_constant(&mut self) -> Value {
-        let idx = self.read_byte();
+        let idx = self.read_byte() as usize;
         let frame = self.current_frame();
-        frame.get_function().chunk.constants[idx as usize]
+        unsafe { *frame.constants.add(idx) }
     }
 
+    #[inline]
     fn read_opcode(&mut self) -> OpCode {
         unsafe { std::mem::transmute(self.read_byte()) }
     }
@@ -531,7 +553,8 @@ impl<W: Write> VM<W> {
     }
 
     fn call(&mut self, closure: Gc<ObjClosure>, arg_count: usize) -> VMResult {
-        let arity = closure.function.arity as usize;
+        let function = closure.function;
+        let arity = function.arity as usize;
         if arg_count != arity {
             return self.runtime_error(format!(
                 "Expected {} argument(s) but got {}.",
@@ -539,16 +562,17 @@ impl<W: Write> VM<W> {
             ));
         }
         let slot_offset = self.stack.len() - arg_count - 1;
-        let needed = slot_offset + closure.function.max_locals as usize + 1;
+        let needed = slot_offset + function.max_locals as usize + 1;
         if self.frames.len() >= self.frames.capacity() || needed >= self.stack.capacity() {
             return self.runtime_error("Stack overflow.");
         }
 
-        self.frames.push(CallFrame {
+        self.frames.push(CallFrame::new(
             closure,
-            ip: 0,
-            slot_offset: self.stack.len() - arg_count - 1,
-        });
+            function,
+            0,
+            self.stack.len() - arg_count - 1,
+        ));
         Ok(())
     }
 
@@ -687,11 +711,11 @@ impl<W: Write> VM<W> {
     }
 
     fn current_frame(&self) -> &CallFrame {
-        self.frames.last().unwrap()
+        unsafe { self.frames.last().unwrap_unchecked() }
     }
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
-        self.frames.last_mut().unwrap()
+        unsafe { self.frames.last_mut().unwrap_unchecked() }
     }
 
     fn allocate<T: Trace>(&mut self, value: T) -> Gc<T> {

@@ -132,6 +132,9 @@ impl Trace for bool {
 impl Trace for u8 {
     fn trace(&self) {}
 }
+impl Trace for *const u8 {
+    fn trace(&self) {}
+}
 impl Trace for () {
     fn trace(&self) {}
 }
