@@ -480,11 +480,12 @@ impl<'src> Compiler<'src> {
         let mut arg_count = 0;
         if !self.check(TokenType::RightParen) {
             loop {
-                self.expression();
-                if arg_count == 255 {
+                if arg_count >= u8::MAX {
                     self.error_at_current("Cannot have more than 255 arguments.");
+                } else {
+                    arg_count += 1;
                 }
-                arg_count += 1;
+                self.expression();
                 if !self.matches(TokenType::Comma) {
                     break;
                 }
@@ -926,10 +927,13 @@ impl<'src> Compiler<'src> {
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expected '(' after function name.");
         if !self.check(TokenType::RightParen) {
-            for arity in 1.. {
+            let mut arity = 1;
+            loop {
                 self.current_context_mut().function.arity = arity;
-                if arity >= 255 {
+                if arity >= u8::MAX {
                     self.error_at_current("Cannot have more than 255 parameters.");
+                } else {
+                    arity += 1;
                 }
 
                 let constant = self.parse_variable("Expected parameter name.");
