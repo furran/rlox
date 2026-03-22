@@ -177,7 +177,10 @@ impl PartialEq for Value {
             (Value::Number(a), Value::Number(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Function(a), Value::Function(b)) => a == b,
+            (Value::Native(a), Value::Native(b)) => a == b,
             (Value::Closure(a), Value::Closure(b)) => a == b,
+            (Value::Class(a), Value::Class(b)) => a == b,
+            (Value::BoundMethod(a), Value::BoundMethod(b)) => a == b,
             _ => false,
         }
     }

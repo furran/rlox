@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
     cell::{Cell, RefCell},
-    clone,
     collections::HashMap,
     fmt::Display,
     ops::Deref,
