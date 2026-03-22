@@ -328,9 +328,8 @@ impl<W: Write> VM<W> {
                     let class = self.stack.peek(0).unwrap_class();
                     if name == self.init_string {
                         class.initializer.set(Some(method));
-                    } else {
-                        class.methods.borrow_mut().insert(name, method);
                     }
+                    class.methods.borrow_mut().insert(name, method);
                 }
                 OpCode::GetSuper => {
                     let name = self.read_constant().unwrap_string();

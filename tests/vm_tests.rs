@@ -917,3 +917,24 @@ fn test_super_in_non_subclass_is_error() {
     );
     assert!(result.is_err());
 }
+
+#[test]
+fn test_super_init() {
+    let output = run(r#"
+        class Doughnut {
+            init(a) {
+                this.a = a;
+            }
+        }
+        class Cruller < Doughnut {
+            init(a,b) {
+                super.init(a);
+                this.b = b;
+            }
+        }
+        var x = Cruller(1,2);
+        print x.a;
+        print x.b;
+    "#);
+    assert_eq!(output.trim(), "1\n2");
+}
