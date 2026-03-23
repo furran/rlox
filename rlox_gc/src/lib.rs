@@ -150,7 +150,7 @@ impl<T: Trace> Trace for Vec<T> {
         }
     }
 }
-impl<K: Trace, V: Trace> Trace for HashMap<K, V> {
+impl<K: Trace, V: Trace, S> Trace for HashMap<K, V, S> {
     fn trace(&self) {
         for (k, v) in self.iter() {
             k.trace();
@@ -158,7 +158,7 @@ impl<K: Trace, V: Trace> Trace for HashMap<K, V> {
         }
     }
 }
-impl<T: Trace> Trace for HashSet<T> {
+impl<T: Trace, S> Trace for HashSet<T, S> {
     fn trace(&self) {
         for v in self {
             v.trace();

@@ -1,12 +1,11 @@
 use std::{
     borrow::Borrow,
-    collections::HashSet,
     hash::{Hash, Hasher},
 };
 
 use rlox_gc::{Gc, Heap, Trace};
 
-use crate::object::ObjString;
+use crate::{fnv_hasher::FnvHashSet, object::ObjString};
 
 #[derive(Debug)]
 struct InternedString(Gc<ObjString>);
@@ -34,7 +33,7 @@ impl Borrow<str> for InternedString {
 #[derive(Debug)]
 pub struct LoxHeap {
     heap: Heap,
-    interned_strings: HashSet<InternedString>,
+    interned_strings: FnvHashSet<InternedString>,
 }
 
 impl Trace for LoxHeap {
@@ -45,7 +44,7 @@ impl LoxHeap {
     pub fn new() -> Self {
         Self {
             heap: Heap::new(),
-            interned_strings: HashSet::new(),
+            interned_strings: FnvHashSet::new(),
         }
     }
 

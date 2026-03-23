@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
     fmt::Display,
     ops::Deref,
     sync::OnceLock,
@@ -11,6 +10,7 @@ use rlox_gc::{Gc, Trace};
 
 use crate::{
     common::Value,
+    fnv_hasher::FnvHashMap,
     vm::{Chunk, vm::Stack},
 };
 
@@ -123,7 +123,7 @@ pub fn native_clock(_args: &[Value]) -> Value {
 #[derive(Debug, Trace)]
 pub struct ObjClass {
     pub name: Gc<ObjString>,
-    pub methods: RefCell<HashMap<Gc<ObjString>, Gc<ObjClosure>>>,
+    pub methods: RefCell<FnvHashMap<Gc<ObjString>, Gc<ObjClosure>>>,
     pub initializer: Cell<Option<Gc<ObjClosure>>>,
 }
 
@@ -131,7 +131,7 @@ impl ObjClass {
     pub fn new(name: Gc<ObjString>) -> Self {
         Self {
             name,
-            methods: RefCell::new(HashMap::new()),
+            methods: RefCell::new(FnvHashMap::new()),
             initializer: Cell::new(None),
         }
     }
@@ -146,14 +146,14 @@ impl Display for ObjClass {
 #[derive(Debug, Trace)]
 pub struct ObjInstance {
     pub class: Gc<ObjClass>,
-    pub fields: RefCell<HashMap<Gc<ObjString>, Value>>,
+    pub fields: RefCell<FnvHashMap<Gc<ObjString>, Value>>,
 }
 
 impl ObjInstance {
     pub fn new(class: Gc<ObjClass>) -> Self {
         Self {
             class,
-            fields: RefCell::new(HashMap::new()),
+            fields: RefCell::new(FnvHashMap::new()),
         }
     }
 }
