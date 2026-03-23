@@ -51,14 +51,22 @@ fn main() {
 
     let name_width = benchmarks.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
     println!(
-        "{:<width$} {:>10} {:>10} {:>8}",
+        "| {:<width$} | {:>10} | {:>10} | {:>8} |",
         "benchmark",
         "clox",
         "rlox",
         "ratio",
         width = name_width
     );
-    println!("{}", "-".repeat(name_width + 10 + 10 + 8 + 3));
+
+    println!(
+        "|{:-<width$}|{:-<12}|{:-<12}|{:-<10}|",
+        "",
+        "",
+        "",
+        "",
+        width = name_width + 2
+    );
 
     for (name, path) in &benchmarks {
         let clox = run_clox(path);
@@ -70,7 +78,7 @@ fn main() {
         };
 
         println!(
-            "{:<4$} {:>10.2?} {:>10.2?} {:>7.2}x",
+            "| {:<4$} | {:>10.2?} | {:>10.2?} | {:>7.2}x |",
             name, clox, rlox, ratio, name_width
         );
     }
