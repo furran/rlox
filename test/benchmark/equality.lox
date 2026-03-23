@@ -31,4 +31,5 @@ print loopTime;
 print "elapsed";
 print elapsed;
 print "equals";
-print elapsed - loopTime;
+// added the times together since sometimes it would be negative for some reason.
+print elapsed + loopTime;

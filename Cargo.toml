@@ -2,6 +2,7 @@
 name = "rlox"
 version = "0.1.0"
 edition = "2024"
+default-run = "rlox"
 
 [dependencies]
 rlox_gc = { path = "rlox_gc" }
@@ -9,6 +10,7 @@ rlox_gc = { path = "rlox_gc" }
 [features]
 gc_stress = ["rlox_gc/gc_stress"]
 gc_log = ["rlox_gc/gc_log"]
+bench_compare = []
 
 [workspace]
 members = [
@@ -18,3 +20,16 @@ members = [
 
 [dev-dependencies]
 walkdir = "2.5.0"
+
+[[test]]
+name = "compare"
+path = "tests/compare.rs"
+harness = false
+required-features = ["bench_compare"]
+
+[[bin]]
+name = "rlox"
+path = "src/main.rs"
+
+[profile.release]
+debug = true
