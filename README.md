@@ -16,8 +16,8 @@ A bytecode virtual machine interpreter for the Lox programming language implemen
 - `delete` keyword for removing fields from instances
 - `switch` / `case` / `default` statements (no fallthrough)
 - Access to undefined instance fields are `nil` instead of runtime error
-
-
+- Support for dynamic field names for instances (i.e. `x["hello world"] = 1`)
+      
 ### Some implementation details
  - Generic `Gc<T>` 'smart' pointer with type-erased GC header
  - Interior mutability via `Cell` and `RefCell` for `Gc` objects
