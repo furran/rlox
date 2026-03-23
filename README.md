@@ -1,6 +1,6 @@
 # rlox
 
-A bytecode virtual machine interpreter for the Lox programming language implemented in Rust. Based on the third part of [Crafting Interpreters](https://craftinginterpreters.com/a-bytecode-virtual-machine.html).
+A bytecode virtual machine interpreter for the Lox programming language implemented in Rust. Based on the third section of [Crafting Interpreters](https://craftinginterpreters.com/a-bytecode-virtual-machine.html).
 
 ## Features
 
@@ -50,7 +50,7 @@ cargo test --test compare --release --features bench_compare -- --no-capture
 
 Heavily inspired by this great blogpost: [Designing a GC in Rust](https://manishearth.github.io/blog/2015/09/01/designing-a-gc-in-rust/)
 
-The garbage collector is implemented as a seperate crate (`rlox_gc`) and is generic-ish\* over any type implementing or deriving `Trace`. It's not really safe and it depends on the VM to uphold the invariants. It works like this:
+The garbage collector is implemented as a separate crate (`rlox_gc`) and is generic-ish\* over any type implementing or deriving `Trace`. It's not really safe and it relies on the VM to uphold it's invariants. It works like this:
 - **Type-erased intrusive linked list**: all allocations are linked through a `GcHeader` embedded at offset 0 of every `Gc Object<T>`. The heap only sees headers; typed access goes through `Gc<T>` handles.
 - **`Gc<T>` is `Copy`**: Gc handles are plain pointer with no ownership semantics
 - **Manual `Drop` vtable**: type-erased `drop` and `trace` fn pointers are stamped into `GcHeader` allowing the gc to call the correct destructor without knowing `T`
