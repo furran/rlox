@@ -10,6 +10,7 @@ use rlox_gc::{Gc, Trace};
 use crate::{
     common::{OpCode, Value, ValuePtr},
     compiler::{Compiler, compiler::CompileError},
+    fnv_hasher::FnvHashMap,
     object::{
         NativeFn, ObjBoundMethod, ObjClass, ObjClosure, ObjFunction, ObjInstance, ObjNative,
         ObjString, Upvalue, native_clock,
@@ -202,7 +203,7 @@ pub struct VM<W: Write> {
     globals: Vec<Option<Value>>,
     global_indices: GlobalIndices,
     frames: Vec<CallFrame>,
-    open_upvalues: HashMap<usize, Gc<Upvalue>>,
+    open_upvalues: FnvHashMap<usize, Gc<Upvalue>>,
     init_string: Gc<ObjString>,
     pub output: W,
 }
@@ -217,7 +218,7 @@ impl<W: Write> VM<W> {
             globals: Vec::new(),
             global_indices: GlobalIndices::new(),
             frames: Vec::with_capacity(64),
-            open_upvalues: HashMap::new(),
+            open_upvalues: FnvHashMap::new(),
             init_string,
             output,
         };
@@ -783,7 +784,7 @@ impl<W: Write> Drop for VM<W> {
 struct Roots<'a>(
     &'a Stack<Value, 256>,
     &'a Vec<CallFrame>,
-    &'a HashMap<usize, Gc<Upvalue>>,
+    &'a FnvHashMap<usize, Gc<Upvalue>>,
     &'a Vec<Option<Value>>,
     &'a GlobalIndices,
     &'a Gc<ObjString>,
