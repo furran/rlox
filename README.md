@@ -50,7 +50,7 @@ cargo test --test lox_tests
 ```
 
 ```bash
-# Compare performance against clox (requires a compiled clox binary in ./tests/)
+# Compare performance against clox (requires a compiled clox binary in project root)
 cargo test --test compare --release --features bench_compare -- --no-capture
 ```
 
