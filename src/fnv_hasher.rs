@@ -21,7 +21,8 @@ impl Hasher for FnvHasher {
     fn write(&mut self, bytes: &[u8]) {
         for &byte in bytes {
             self.0 ^= byte as u64;
-            self.0 *= 16777619;
+            let (result, _) = self.0.overflowing_mul(16777619);
+            self.0 = result;
         }
     }
 }
