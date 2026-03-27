@@ -105,6 +105,10 @@ where
         unsafe { *self.data.get_unchecked(self.top - 1 - offset) }
     }
 
+    fn peek_mut(&mut self, offset: usize) -> &mut T {
+        unsafe { self.data.get_unchecked_mut(self.top - 1 - offset) }
+    }
+
     fn truncate(&mut self, len: usize) {
         self.top = len;
     }
@@ -583,8 +587,7 @@ impl<W: Write> VM<W> {
             Value::Class(class) => {
                 let obj_instance = ObjInstance::new(class);
                 let instance = Value::Instance(self.allocate(obj_instance));
-                let top = self.stack.top;
-                self.stack[top - arg_count - 1] = instance;
+                *self.stack.peek_mut(arg_count) = instance;
                 if let Some(initializer) = class.initializer.get() {
                     return self.call(initializer, arg_count);
                 } else if arg_count != 0 {
@@ -594,8 +597,7 @@ impl<W: Write> VM<W> {
                 Ok(())
             }
             Value::BoundMethod(bound) => {
-                let top = self.stack.top;
-                self.stack[top - arg_count - 1] = bound.receiver;
+                *self.stack.peek_mut(arg_count) = bound.receiver;
                 self.call(bound.method, arg_count)
             }
             Value::Native(native) => {
@@ -623,8 +625,7 @@ impl<W: Write> VM<W> {
         };
 
         if let Some(&value) = instance.fields.borrow().get(&name) {
-            let top = self.stack.top;
-            self.stack[top - arg_count - 1] = value;
+            *self.stack.peek_mut(arg_count) = value;
             return self.call_value(value, arg_count);
         }
 
